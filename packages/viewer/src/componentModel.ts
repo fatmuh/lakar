@@ -145,10 +145,10 @@ export const GROUP_PROPS: Readonly<Record<Group, readonly string[]>> = {
   autoLayout: ['layout', 'gap', 'padding', 'align', 'justify', 'gridTemplateColumns', 'gridTemplateRows', 'columnGap', 'rowGap', 'wrap', 'clip', 'scrollY'],
   typography: ['content', 'family', 'weight', 'style', 'size', 'lineHeight', 'letterSpacing', 'align', 'wrap', 'numeric', 'color'],
   icon: ['lib', 'icon', 'version', 'size', 'color', 'strokeWidth', 'filled'],
+  appearance: ['radius', 'opacity', 'blend'],
   fill: ['fills', 'fillRule'],
   stroke: ['stroke', 'strokeLinecap', 'strokeLinejoin', 'strokeDasharray', 'strokeMiterlimit', 'svg'],
-  radius: ['radius'],
-  effects: ['opacity', 'blend', 'blur', 'backdropBlur', 'shadows'],
+  effects: ['blur', 'backdropBlur', 'shadows'],
 };
 
 /** Target yang membawa entri override (DesignTarget instance/komposit). */

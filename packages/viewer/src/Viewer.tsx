@@ -109,6 +109,7 @@ import { Modal } from './NewFileDialog';
 import { ShortcutsModal } from './ShortcutsModal';
 import { DesignPanel } from './DesignPanel';
 import { CodeExportDialog } from './CodeExportDialog';
+import type { CodegenTarget } from './codeExport';
 import { ShareDialog } from './ShareDialog';
 import { ImportCssDialog, ImportDtcgDialog } from './TokensCss';
 import { effectiveMode } from './themeModel';
@@ -339,8 +340,9 @@ export function Viewer({ slug }: { slug: string }) {
   const [restoreAsk, setRestoreAsk] = useState<HistoryEntry | undefined>(undefined);
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState<string | undefined>(undefined);
-  /** Dialog Export code (epic kode story 5): id node sumber; ditutup saat pratinjau versi. */
-  const [codeExport, setCodeExport] = useState<string | undefined>(undefined);
+  /** Dialog Export code (epic kode story 5): id node sumber + target awal dari seksi Code; ditutup saat pratinjau versi. */
+  const [codeExport, setCodeExport] = useState<{ id: string; target?: CodegenTarget } | undefined>(undefined);
+  const openCodeExport = (id: string, target?: CodegenTarget) => setCodeExport({ id, target });
   /** Dialog Share link (plan-share-link-ui): tombol di topbar; ditutup saat pratinjau versi. */
   const [shareOpen, setShareOpen] = useState(false);
   /** Dialog Import (panel Theme): CSS variables (epic kode story 5) dan DTCG tokens (story 9). */
@@ -2085,7 +2087,7 @@ export function Viewer({ slug }: { slug: string }) {
         components={latestComponents}
         pastedTag={pasteToast?.report.kind === 'html' && pasteToast.nodeId ? { id: pasteToast.nodeId, label: pasteToast.layer } : undefined}
         onDropComponent={(id, at) => latestComponents && insertInstance(id, dropTarget(latestComponents, id, sceneRef.current?.() ?? [], at))}
-        onExportCode={setCodeExport}
+        onExportCode={openCodeExport}
         preview={canvasPreview}
         editable={editable}
         onInsert={onCanvasInsert}
@@ -2132,7 +2134,7 @@ export function Viewer({ slug }: { slug: string }) {
               component={componentPanel}
               componentEdit={componentEdit}
               pathEdit={pathEdit}
-              onExportCode={preview ? undefined : setCodeExport}
+              onExportCode={preview ? undefined : openCodeExport}
               align={designTargets.length > 1 ? { enabled: editable ? actionState(sceneRef.current?.() ?? [], selection) : NO_ACTIONS, run: (a) => runAction(a) } : undefined}
               slug={slug}
               doc={latestDoc}
@@ -2170,7 +2172,7 @@ export function Viewer({ slug }: { slug: string }) {
         />
       )}
       {toast && <Toast toast={toast} onClose={closeToast} />}
-      {codeExport && !preview && <CodeExportDialog doc={latestDoc} nodeId={codeExport} onClose={() => setCodeExport(undefined)} />}
+      {codeExport && !preview && <CodeExportDialog doc={latestDoc} nodeId={codeExport.id} initialTarget={codeExport.target} onClose={() => setCodeExport(undefined)} />}
       {shareOpen && !preview && <ShareDialog slug={slug} onClose={() => setShareOpen(false)} />}
       {cssImportOpen && !preview && (
         <ImportCssDialog
@@ -2203,7 +2205,7 @@ export function Viewer({ slug }: { slug: string }) {
           enabled={editable ? actionState(sceneRef.current?.() ?? [], editMenu.ids) : NO_ACTIONS}
           onAction={(a) => runAction(a, editMenu.ids)}
           onClose={() => setEditMenu(undefined)}
-          onExportCode={preview ? undefined : editMenu.ids.length === 1 ? () => setCodeExport(editMenu.ids[0]) : null}
+          onExportCode={preview ? undefined : editMenu.ids.length === 1 ? () => editMenu.ids[0] !== undefined && openCodeExport(editMenu.ids[0]) : null}
           onSection={
             preview || !editable || !editMenu.ids.some((id) => boards.some((b) => b.id === id))
               ? undefined

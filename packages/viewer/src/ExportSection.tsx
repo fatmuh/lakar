@@ -1,9 +1,12 @@
-// Seksi "Export" di tab Design (spec-viewer-merged-design-tab, desain viewer-panel-redesign.pen): preset baris ala
-// Figma (skala + format + −, "+" tambah preset), kolom tujuan (folder + nama; ekstensi dari format), tombol "Export
-// <nama>" yang menulis ke disk lewat POST /viewer/docs/:slug/export-file, row "Preview" (thumbnail lewat export PNG),
-// dan row Code → dialog Export code. Bekerja pada layer terpilih (seleksi tunggal); tanpa seleksi → dinonaktifkan.
+// Seksi "Export" dan "Code" di tab Design (spec-design-panel-figma, desain design-panel-figma.pen): preset baris
+// ala Figma (skala ▾ + format ▾ + sufiks + −, "+" tambah preset), kolom tujuan (folder + nama; sufiks ekstensi
+// redup dari format), tombol "Export <nama>" sekunder penuh yang menulis ke disk lewat POST /viewer/docs/:slug/
+// export-file, row "Preview" (thumbnail lewat export PNG), dan seksi Code (select target + tombol "Export…" →
+// dialog Export code). Bekerja pada layer terpilih (seleksi tunggal); tanpa seleksi → dinonaktifkan.
+// Menu "···" pada baris preset FIGMA-ONLY (tak ada aksi nyata) — dihilangkan.
 import { useEffect, useState } from 'react';
 import { api, errorText } from './api';
+import { TARGET_LABEL, type CodegenTarget } from './codeExport';
 import { Icon } from './icons';
 
 export type ExportSel = { boardId: string; nodeId: string; name: string };
@@ -24,13 +27,10 @@ type Status = { state: 'idle' } | { state: 'busy' } | { state: 'saved'; path: st
 export function ExportSection({
   slug,
   sel,
-  onExportCode,
 }: {
   slug: string;
   /** Seleksi tunggal yang bisa diekspor; undefined = tanpa seleksi sah (dinonaktifkan). */
   sel: ExportSel | undefined;
-  /** Buka dialog Export code untuk layer terpilih; undefined = disembunyikan. */
-  onExportCode?: (() => void) | undefined;
 }) {
   const [open, setOpen] = useState(true);
   const [presets, setPresets] = useState<readonly Preset[]>([newPreset('png'), newPreset('svg')]);
@@ -80,6 +80,8 @@ export function ExportSection({
   };
 
   const summary = presets.map((p) => `${p.format.toUpperCase()} ${p.scale}x`).join(' · ');
+  // Sufiks ekstensi redup pada kolom Name (desain: ".png"); campuran format → tanpa sufiks.
+  const ext = presets.every((p) => p.format === presets[0]?.format) ? `.${presets[0]?.format ?? 'png'}` : undefined;
   return (
     <div className="export-section">
       <div className="dp-section-head">
@@ -105,21 +107,28 @@ export function ExportSection({
         <div className="export-section-body">
           {presets.map((p) => (
             <div key={p.id} className="export-preset">
-              <div className="segmented" role="radiogroup" aria-label="Scale">
-                {([1, 2] as const).map((sc) => (
-                  <button
-                    key={sc}
-                    type="button"
-                    role="radio"
-                    aria-checked={p.scale === sc}
-                    className={`segment${p.scale === sc ? ' active' : ''}`}
-                    disabled={p.format === 'svg'}
-                    onClick={() => setPresets((ps) => ps.map((q) => (q.id === p.id ? { ...q, scale: sc, suffix: sc === 1 ? '' : '@2x' } : q)))}
-                  >
-                    {sc}x
-                  </button>
-                ))}
-              </div>
+              <label className="dp-select export-scale">
+                <select
+                  aria-label="Scale"
+                  value={p.scale}
+                  disabled={p.format === 'svg'}
+                  onChange={(e) => {
+                    const scale = Number(e.currentTarget.value) as 1 | 2;
+                    setPresets((ps) => ps.map((q) => (q.id === p.id ? { ...q, scale, suffix: scale === 1 ? '' : '@2x' } : q)));
+                  }}
+                >
+                  <option value={1}>1x</option>
+                  <option value={2}>2x</option>
+                </select>
+                <Icon name="chevronDown" size={12} className="dp-select-chevron" />
+              </label>
+              <label className="dp-select export-format">
+                <select aria-label="Format" value={p.format} onChange={(e) => setPresets((ps) => ps.map((q) => (q.id === p.id ? { ...q, format: e.currentTarget.value as 'png' | 'svg' } : q)))}>
+                  <option value="png">PNG</option>
+                  <option value="svg">SVG</option>
+                </select>
+                <Icon name="chevronDown" size={12} className="dp-select-chevron" />
+              </label>
               <input
                 className="input export-suffix"
                 value={p.suffix}
@@ -128,24 +137,15 @@ export function ExportSection({
                 spellCheck={false}
                 onChange={(e) => setPresets((ps) => ps.map((q) => (q.id === p.id ? { ...q, suffix: e.currentTarget.value } : q)))}
               />
-              <select
-                className="input select export-format"
-                value={p.format}
-                aria-label="Format"
-                onChange={(e) => setPresets((ps) => ps.map((q) => (q.id === p.id ? { ...q, format: e.currentTarget.value as 'png' | 'svg' } : q)))}
-              >
-                <option value="png">PNG</option>
-                <option value="svg">SVG</option>
-              </select>
               <button
                 type="button"
-                className="theme-icon-btn"
+                className="dp-icon-btn"
                 title="Remove preset"
                 aria-label="Remove preset"
                 disabled={presets.length <= 1}
                 onClick={() => setPresets((ps) => ps.filter((q) => q.id !== p.id))}
               >
-                <Icon name="minus" size={13} />
+                <Icon name="minus" size={14} />
               </button>
             </div>
           ))}
@@ -156,12 +156,16 @@ export function ExportSection({
             </label>
             <label className="export-dest-row">
               <span className="export-dest-label">Name</span>
-              <input className="input" value={name} placeholder="file name" spellCheck={false} aria-label="File name" onChange={(e) => setName(e.currentTarget.value)} />
+              <span className="export-dest-input">
+                <input className="input" value={name} placeholder="file name" spellCheck={false} aria-label="File name" onChange={(e) => setName(e.currentTarget.value)} />
+                {ext && <span className="export-ext">{ext}</span>}
+              </span>
             </label>
           </div>
+          {/* Tombol Export (desain: sekunder netral penuh, bukan primary putih). */}
           <button
             type="button"
-            className="btn primary export-run"
+            className="btn export-run"
             disabled={!sel || !name.trim() || !dir.trim() || status.state === 'busy'}
             onClick={run}
             title={!sel ? 'Select a layer to export' : undefined}
@@ -188,18 +192,41 @@ export function ExportSection({
               <span>{status.message}</span>
             </div>
           )}
-          {onExportCode && (
-            <div className="export-code-row">
-              <span className="export-code-label">Code</span>
-              <span className="export-code-target">React + Tailwind · TS</span>
-              <button type="button" className="btn export-code-btn" disabled={!sel} onClick={onExportCode}>
-                <Icon name="codeXml" size={14} />
-                Export code…
-              </button>
-            </div>
-          )}
         </div>
       )}
     </div>
+  );
+}
+
+const CODE_TARGETS: readonly CodegenTarget[] = ['react-tailwind', 'react-css'];
+
+/**
+ * Seksi "Code" (desain badge 9): satu baris — select target ("React + Tailwind ▾") + tombol "Export…" membuka
+ * dialog Export code dengan target awal pilihan. Tersembunyi bila tak ada penjalan `onExportCode` (preview).
+ */
+export function CodeSection({ sel, onExportCode }: { sel: ExportSel | undefined; onExportCode?: ((id: string, target?: CodegenTarget) => void) | undefined }) {
+  const [target, setTarget] = useState<CodegenTarget>('react-tailwind');
+  if (!onExportCode) return null;
+  return (
+    <section className="dp-group code-section">
+      <div className="dp-group-header">
+        <h3>Code</h3>
+      </div>
+      <div className="dp-row code-row">
+        <label className="dp-select dp-grow">
+          <select aria-label="Code target" value={target} onChange={(e) => setTarget(e.currentTarget.value as CodegenTarget)}>
+            {CODE_TARGETS.map((t) => (
+              <option key={t} value={t}>
+                {TARGET_LABEL[t]}
+              </option>
+            ))}
+          </select>
+          <Icon name="chevronDown" size={12} className="dp-select-chevron" />
+        </label>
+        <button type="button" className="btn code-export-btn" disabled={!sel} title={!sel ? 'Select a layer to export code' : undefined} onClick={() => sel && onExportCode(sel.nodeId, target)}>
+          Export…
+        </button>
+      </div>
+    </section>
   );
 }

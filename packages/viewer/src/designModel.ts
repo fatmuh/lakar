@@ -30,19 +30,24 @@ export type DesignTarget = {
   overrides?: Readonly<Record<string, unknown>> | undefined;
 };
 
-export type Group = 'position' | 'autoLayout' | 'typography' | 'icon' | 'fill' | 'stroke' | 'radius' | 'effects';
+export type Group = 'position' | 'autoLayout' | 'typography' | 'icon' | 'appearance' | 'fill' | 'stroke' | 'effects';
 
-/** Kelompok per tipe (urutan tampil). Teks tidak punya fills/stroke di skema, jadi kelompok itu tidak tampil. */
+/**
+ * Kelompok per tipe (urutan tampil, spec-design-panel-figma). `appearance` = Opacity + Blend + Radius; kontrol
+ * Radius sendiri hanya tampil bila semua target termasuk RADIUS_TYPES (frame/rect — satu-satunya yang punya
+ * `radius` di skema). Teks tidak punya fills/stroke di skema, jadi kelompok itu tidak tampil.
+ */
+export const RADIUS_TYPES: ReadonlySet<string> = new Set(['frame', 'rect']);
 const GROUPS: Record<string, readonly Group[]> = {
   board: ['position', 'fill'],
-  frame: ['position', 'autoLayout', 'fill', 'stroke', 'radius', 'effects'],
-  rect: ['position', 'fill', 'stroke', 'radius', 'effects'],
-  ellipse: ['position', 'fill', 'stroke', 'effects'],
-  path: ['position', 'fill', 'stroke', 'effects'],
-  text: ['position', 'typography', 'effects'],
-  icon: ['position', 'icon', 'effects'],
+  frame: ['position', 'autoLayout', 'appearance', 'fill', 'stroke', 'effects'],
+  rect: ['position', 'appearance', 'fill', 'stroke', 'effects'],
+  ellipse: ['position', 'appearance', 'fill', 'stroke', 'effects'],
+  path: ['position', 'appearance', 'fill', 'stroke', 'effects'],
+  text: ['position', 'typography', 'appearance', 'effects'],
+  icon: ['position', 'icon', 'appearance', 'effects'],
 };
-const ORDER: readonly Group[] = ['position', 'autoLayout', 'typography', 'icon', 'fill', 'stroke', 'radius', 'effects'];
+const ORDER: readonly Group[] = ['position', 'autoLayout', 'typography', 'icon', 'appearance', 'fill', 'stroke', 'effects'];
 
 /** Kelompok yang berlaku untuk semua node terpilih. */
 export function designGroups(targets: readonly DesignTarget[]): Group[] {
@@ -202,6 +207,66 @@ export function enterGrid(targets: readonly DesignTarget[]): DocOp[] {
     if (tracksOf(t.stored, 'gridTemplateColumns').length) return { layout: 'grid', wrap: null };
     const kids = Array.isArray(t.stored.children) ? t.stored.children.length : 0;
     return { layout: 'grid', wrap: null, gridTemplateColumns: Array.from({ length: Math.min(Math.max(kids, 1), 3) }, () => ({ fr: 1 })) };
+  });
+}
+
+/** Sumbu padding panel: 'h' = kiri/kanan, 'v' = atas/bawah. */
+export type PadAxis = 'h' | 'v';
+
+/** Padding tersimpan → 4 sisi [atas, kanan, bawah, kiri]; angka = semua sisi; [v,h] = shorthand CSS. */
+export function paddingEdges(v: unknown): unknown[] {
+  if (Array.isArray(v)) {
+    if (v.length === 4) return [...v];
+    if (v.length === 2) return [v[0] ?? 0, v[1] ?? 0, v[0] ?? 0, v[1] ?? 0];
+  }
+  return [v ?? 0, v ?? 0, v ?? 0, v ?? 0];
+}
+
+/** Tulis ulang tuple sisi menjadi bentuk skema minimal: semua sama → angka; [v,h] → array 2; selain itu array 4. */
+const padTuple = (e: unknown[]): unknown => {
+  if (e.every((x) => sameValue(x, e[0]))) return e[0];
+  if (sameValue(e[0], e[2]) && sameValue(e[1], e[3])) return [e[0], e[1]];
+  return e;
+};
+
+/**
+ * FieldState sumbu padding (kolom Pad H/V, spec-design-panel-figma): kedua sisi sumbu pada satu node beda, atau
+ * nilai sumbu beda antar node → mixed. Ref token pada salah satu sisi ikut terbaca (ditampilkan apa adanya).
+ */
+export function paddingAxisState(targets: readonly DesignTarget[], axis: PadAxis): FieldState {
+  const idx: [number, number] = axis === 'h' ? [1, 3] : [0, 2];
+  const axisOf = (n: Raw): { same: boolean; value: unknown } => {
+    const e = paddingEdges(n.padding);
+    return sameValue(e[idx[0]], e[idx[1]]) ? { same: true, value: e[idx[0]] } : { same: false, value: undefined };
+  };
+  const first = targets[0];
+  if (!first) return { mixed: false, value: undefined, resolved: undefined };
+  const vals = targets.map((t) => axisOf(t.stored));
+  if (vals.some((v) => !v.same || !sameValue(v.value, vals[0]!.value))) return { mixed: true };
+  const res = axisOf(first.resolved);
+  return { mixed: false, value: vals[0]!.value, resolved: res.same ? res.value : vals[0]!.value };
+}
+
+/** Sisi padding tunggal (indeks tuple [t,r,b,l]) untuk kolom mode Independent. */
+export const paddingEdgeOf = (n: Raw, i: number): unknown => paddingEdges(n.padding)[i];
+
+/** Ubah kedua sisi satu sumbu padding (sisi lain dipertahankan), lalu normalisasi tuple. */
+export function setPaddingAxis(targets: readonly DesignTarget[], axis: PadAxis, value: unknown): DocOp[] {
+  const idx: [number, number] = axis === 'h' ? [1, 3] : [0, 2];
+  return opsFor(targets, (t) => {
+    const e = paddingEdges(t.stored.padding);
+    e[idx[0]] = value;
+    e[idx[1]] = value;
+    return { padding: padTuple(e) };
+  });
+}
+
+/** Ubah satu sisi padding (tuple 4), lalu normalisasi. */
+export function setPaddingEdge(targets: readonly DesignTarget[], index: number, value: unknown): DocOp[] {
+  return opsFor(targets, (t) => {
+    const e = paddingEdges(t.stored.padding);
+    e[index] = value;
+    return { padding: padTuple(e) };
   });
 }
 
@@ -437,9 +502,69 @@ export const SHADOW_DEFAULT = { type: 'drop', x: 0, y: 4, blur: 12, color: '#000
 const shadowsOf = (n: Raw): Raw[] => (Array.isArray(n.shadows) ? (n.shadows as Raw[]) : []);
 const withShadows = (s: Raw[]): Patch => ({ shadows: s.length ? s : null });
 
-export const addShadow = (targets: readonly DesignTarget[]) => opsFor(targets, (t) => withShadows([...shadowsOf(t.stored), { ...SHADOW_DEFAULT }]));
+/** Jenis efek daftar (spec-design-panel-figma): dua jenis shadow + blur layer + blur latar. */
+export type EffectKind = 'drop' | 'inner' | 'blur' | 'backdropBlur';
+/** Baris efek satu node: shadow menyertakan indeks array; skalar blur/backdropBlur tidak berindeks. */
+export type EffectRow = { kind: 'drop' | 'inner'; index: number; shadow: Raw; resolved: Raw } | { kind: 'blur' | 'backdropBlur'; value: unknown; resolved: unknown };
+
+/** Jenis baris efek yang sudah dipakai node (untuk menonaktifkan duplikat skalar di menu "+"). */
+export const effectKindsOf = (n: Raw): Set<EffectKind> => {
+  const k = new Set<EffectKind>();
+  for (const s of shadowsOf(n)) k.add(s.type === 'inner' ? 'inner' : 'drop');
+  if (typeof n.blur === 'number' && n.blur !== 0) k.add('blur');
+  if (typeof n.backdropBlur === 'number' && n.backdropBlur !== 0) k.add('backdropBlur');
+  return k;
+};
+
+export const addShadow = (targets: readonly DesignTarget[], type: 'drop' | 'inner' = 'drop') =>
+  opsFor(targets, (t) => withShadows([...shadowsOf(t.stored), { ...SHADOW_DEFAULT, type }]));
+
+/** Tambah baris efek: shadow baru bertipe `kind`, atau skalar blur/backdropBlur = 8 bila belum diisi. */
+export function addEffect(targets: readonly DesignTarget[], kind: EffectKind): DocOp[] {
+  if (kind === 'drop' || kind === 'inner') return addShadow(targets, kind);
+  return opsFor(targets, (t) => (typeof t.stored[kind] === 'number' && t.stored[kind] !== 0 ? undefined : { [kind]: 8 }));
+}
+
 export const removeShadow = (targets: readonly DesignTarget[], index: number) =>
   opsFor(targets, (t) => withShadows(shadowsOf(t.stored).filter((_, i) => i !== index)));
+
+/** Hapus satu baris efek: shadow pada indeks `index`, atau skalar blur/backdropBlur. */
+export function removeEffect(targets: readonly DesignTarget[], kind: EffectKind, index = 0): DocOp[] {
+  return kind === 'blur' || kind === 'backdropBlur' ? setProp(targets, kind, null) : removeShadow(targets, index);
+}
+
+/**
+ * Ubah jenis satu baris efek (menu jenis di baris, spec-design-panel-figma): shadow↔shadow mengganti `type` di
+ * tempat; shadow→skalar membuang shadow dan mengisi skalar 8; skalar→shadow membuang skalar dan menambah shadow
+ * `SHADOW_DEFAULT`; skalar↔skalar memindahkan nilai ke kunci lain.
+ */
+export function convertEffect(targets: readonly DesignTarget[], from: { index: number } | 'blur' | 'backdropBlur', to: EffectKind): DocOp[] {
+  const toShadow = to === 'drop' || to === 'inner';
+  return opsFor(targets, (t) => {
+    const list = shadowsOf(t.stored);
+    const patch: Patch = {};
+    if (typeof from === 'object') {
+      const cur = list[from.index];
+      if (!cur) return undefined;
+      if (toShadow) {
+        patch.shadows = list.map((s, i) => (i === from.index ? { ...s, type: to } : s));
+        return patch;
+      }
+      const next = list.filter((_, i) => i !== from.index);
+      patch.shadows = next.length ? next : null;
+    } else {
+      patch[from] = null;
+    }
+    if (toShadow) {
+      const base = Array.isArray(patch.shadows) ? (patch.shadows as Raw[]) : list.filter((_, i) => i !== (typeof from === 'object' ? from.index : -1));
+      patch.shadows = [...base, { ...SHADOW_DEFAULT, type: to }];
+    } else {
+      // Nilai lama dibawa bila skalar sumber bertipe sama (mis. blur → backdropBlur).
+      patch[to] = typeof from === 'object' ? 8 : t.stored[from] ?? 8;
+    }
+    return patch;
+  });
+}
 
 /** Ubah shadow indeks `index` lewat `edit(shadow, resolved)`. */
 export function editShadow(targets: readonly DesignTarget[], index: number, edit: (s: Raw, resolved: Raw) => Raw | undefined): DocOp[] {

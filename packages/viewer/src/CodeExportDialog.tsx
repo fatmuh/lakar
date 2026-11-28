@@ -35,8 +35,8 @@ const OPTIONS: { key: 'components' | 'tokens' | 'typescript'; title: string; sub
   { key: 'typescript', title: 'TypeScript', sub: 'Typed props for text, boolean and enum' },
 ];
 
-export function CodeExportDialog({ doc, nodeId, onClose }: { doc: LakarDocument; nodeId: string; onClose: () => void }) {
-  const [settings, setSettings] = useState<CodeExportSettings>(DEFAULT_SETTINGS);
+export function CodeExportDialog({ doc, nodeId, initialTarget, onClose }: { doc: LakarDocument; nodeId: string; initialTarget?: CodegenTarget | undefined; onClose: () => void }) {
+  const [settings, setSettings] = useState<CodeExportSettings>(() => (initialTarget ? { ...DEFAULT_SETTINGS, target: initialTarget } : DEFAULT_SETTINGS));
   const [result, setResult] = useState<State>({ state: 'loading' });
   const [active, setActive] = useState<string | undefined>(undefined);
   const [copied, setCopied] = useState<'file' | 'icon' | undefined>(undefined);

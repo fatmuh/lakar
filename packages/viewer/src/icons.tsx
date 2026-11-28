@@ -110,6 +110,7 @@ const ICONS = {
   columns2: [['rect', 3, 3, 18, 18, 2], ['path', 'M12 3v18']],
   squareDashed: [['path', 'M5 3a2 2 0 0 0-2 2M19 3a2 2 0 0 1 2 2M21 19a2 2 0 0 1-2 2M5 21a2 2 0 0 1-2-2M9 3h1M9 21h1M14 3h1M14 21h1M3 9v1M21 9v1M3 14v1M21 14v1']],
   arrowRight: [['path', 'M5 12h14M12 5l7 7-7 7']],
+  arrowLeft: [['path', 'm12 19-7-7 7-7'], ['path', 'M19 12H5']],
   textAlignStart: [['path', 'M21 5H3M15 12H3M17 19H3']],
   textAlignCenter: [['path', 'M21 5H3M17 12H7M19 19H5']],
   textAlignEnd: [['path', 'M21 5H3M21 12H9M21 19H7']],
@@ -202,6 +203,22 @@ const ICONS = {
   // Prototipe (spec-prototype-mode): tombol Present dan bendera awal flow di canvas.
   play: [['path', 'm6 4 14 8-14 8V4z']],
   flag: [['path', 'M4 22V4c4-2 8 2 16 0v12c-8 2-12-2-16 0']],
+  // Panel Design ala Figma (spec-design-panel-figma): ikon baris field, toggle, dan efek.
+  gripVertical: [['circle', 9, 5, 1], ['circle', 9, 12, 1], ['circle', 9, 19, 1], ['circle', 15, 5, 1], ['circle', 15, 12, 1], ['circle', 15, 19, 1]],
+  eyeOff: [['path', 'M9.88 9.88a3 3 0 1 0 4.24 4.24'], ['path', 'M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68'], ['path', 'M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61'], ['path', 'm2 2 20 20']],
+  folderOpen: [['path', 'm6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2']],
+  droplet: [['path', 'M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z']],
+  blend: [['circle', 15, 9, 6], ['circle', 9, 15, 6]],
+  settings2: [['path', 'M20 7h-9'], ['path', 'M14 17H5'], ['circle', 17, 17, 3], ['circle', 7, 7, 3]],
+  moveVertical: [['path', 'm8 18 4 4 4-4'], ['path', 'm8 6 4-4 4 4'], ['path', 'M12 2v20']],
+  betweenHorizontalStart: [['rect', 3, 8, 7, 13, 1], ['path', 'm15 2-3 3 3 3'], ['rect', 14, 8, 7, 13, 1]],
+  betweenVerticalStart: [['rect', 8, 3, 13, 7, 1], ['path', 'm9 22-3-3 3-3'], ['rect', 8, 14, 13, 7, 1]],
+  wrapText: [['path', 'm16 16-2 2 2 2'], ['path', 'M3 12h15a3 3 0 1 1 0 6h-4'], ['path', 'M3 18h7'], ['path', 'M3 6h18']],
+  stretchVertical: [['rect', 4, 2, 6, 20, 2], ['rect', 14, 2, 6, 20, 2]],
+  squareRoundCorner: [['path', 'M21 11a8 8 0 0 0-8-8'], ['path', 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4']],
+  arrowUpLeft: [['path', 'M7 17V7h10'], ['path', 'M17 17 7 7']],
+  arrowDownLeft: [['path', 'M17 7 7 17'], ['path', 'M17 17H7V7']],
+  arrowDownRight: [['path', 'm7 7 10 10'], ['path', 'M17 7v10H7']],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof ICONS;
