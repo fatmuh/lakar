@@ -9600,28 +9600,42 @@ button.panel-tab:hover {
   opacity: 0.5;
 }
 
-/* ---- Gate sign-in first-run (spec-first-run-signin task D): layar penuh di area body.
-   Kartu terpusat, semua metode sign-in setara visual (tanpa aksen — aksen hanya ring fokus);
-   skip adalah .btn ghost lebar penuh, bukan link kecil (anti dark-pattern). ---- */
+/* ---- Gate sign-in first-run (spec-first-run-signin task D; desain first-run-signin-v2): layar
+   penuh di area body. Panel terbagi: kolom sign-in kiri + panel kanvas kanan (vinyet + benefit/
+   caption); di bawah 900px panel menumpuk satu kolom dan vinyet disembunyikan. Semua metode
+   sign-in setara visual — aksen hanya di ring fokus field email dan strip status. ---- */
 .onboarding {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: auto;
+  padding: 32px 16px;
+  background: var(--bg);
+}
+.onboarding-panel {
+  display: flex;
+  width: min(840px, 100%);
+  margin: auto;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 24px 64px var(--shadow);
+}
+.onboarding-column {
+  flex: 0 0 420px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 40px 48px;
+}
+.onboarding-content {
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 24px 16px;
-  background: var(--bg);
-}
-.onboarding-card {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  width: min(400px, 100%);
-  padding: 32px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  gap: 28px;
 }
 .onboarding-brand {
   display: flex;
@@ -9633,74 +9647,116 @@ button.panel-tab:hover {
 .onboarding-logo {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   background: radial-gradient(120% 90% at 50% -20%, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0) 55%),
     linear-gradient(135deg, #5ea3ff, #2563eb);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
   color: #fff;
 }
 .onboarding-wordmark {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
+  letter-spacing: -0.4px;
+}
+.onboarding-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.onboarding-heading-badge {
+  gap: 16px;
 }
 .onboarding-title {
   margin: 0;
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.7px;
+  text-wrap: balance;
 }
 .onboarding-title:focus {
   outline: none;
 }
 .onboarding-tagline {
-  margin: 6px 0 0;
+  margin: 0;
   color: var(--text-secondary);
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
-.onboarding-email {
-  font-weight: 600;
-  color: var(--text-primary);
-  word-break: break-all;
+.onboarding-badge {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
-.onboarding-benefits {
+.onboarding-badge.success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.onboarding-sent-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.45;
-}
-.onboarding-benefits li {
-  display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 6px;
 }
-.onboarding-benefits svg {
-  flex: none;
-  margin-top: 2px;
+/* Alamat tujuan sebagai chip data, bukan prosa. */
+.onboarding-address {
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.onboarding-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.onboarding-stack-tight {
+  gap: 8px;
 }
 .onboarding-providers {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
-.onboarding-providers .cloud-btn {
+/* Tombol lebar penuh 40px: sekunder terisi (surface-hover + hairline), .primary, atau .ghost. */
+.onboarding-btn {
+  width: 100%;
   height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border-color: var(--hairline);
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
-.onboarding-providers .cloud-email {
-  flex-direction: column;
+.onboarding-btn:not(.primary):not(.ghost):hover:not(:disabled) {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--surface-hover) 92%, var(--text-primary));
+}
+.onboarding-btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+.onboarding-btn.ghost:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 .onboarding-divider {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 4px 0;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   font-size: 12px;
 }
 .onboarding-divider::before,
@@ -9709,43 +9765,41 @@ button.panel-tab:hover {
   flex: 1;
   border-top: 1px solid var(--border);
 }
-.onboarding-actions {
+/* Magic link: field memuat tombol "Send link" inset; ring aksen hanya saat input difokus. */
+.onboarding-email {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-/* Aksi tunggal di S4/S4b (Try again satu-satunya jalan keluar) — tinggi sama dgn baris provider. */
-.onboarding-actions .btn:only-child {
-  height: 40px;
-}
-.onboarding-note {
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  gap: 10px;
   margin: 0;
 }
-/* Magic link (desain update first-run-signin): field + tombol "Send link" sebaris —
-   bobot visual sama dengan tombol provider, bukan blok form terpisah. */
-.onboarding-email-row {
+.onboarding-email-field {
   display: flex;
   align-items: center;
   gap: 8px;
+  height: 40px;
+  padding: 0 4px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input);
 }
-.onboarding-email-field {
+.onboarding-email-field:has(input:focus) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.onboarding-email-input {
   flex: 1;
   min-width: 0;
-  height: 40px;
-  border-radius: 6px;
+  height: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   cursor: text;
 }
-.onboarding-email-field:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+.onboarding-email-input svg {
+  flex: none;
 }
-.onboarding-email-field input {
+.onboarding-email-input input {
   flex: 1;
   min-width: 0;
   border: 0;
@@ -9755,40 +9809,301 @@ button.panel-tab:hover {
   font: 400 13px var(--font-ui);
   color: var(--text-primary);
 }
-.onboarding-email-row .btn {
-  height: 40px;
-  padding: 0 16px;
-  flex: none;
+.onboarding-email-input input::placeholder {
+  color: var(--text-muted);
 }
-.onboarding-email-hint {
+.onboarding-email-send {
+  flex: none;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+}
+.onboarding-hint {
   margin: 0;
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
-  color: var(--text-secondary);
 }
-.onboarding-email-hint.danger {
+.onboarding-hint.danger {
   color: var(--danger);
 }
-.onboarding-success {
+/* S2: strip status beraksen — satu-satunya elemen aksen di state menunggu. */
+.onboarding-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.onboarding-status svg {
+  flex: none;
+  color: var(--accent);
+}
+.onboarding-account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-hover);
+}
+.onboarding-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--avatar);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.onboarding-identity {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.onboarding-identity > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.onboarding-identity-name {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.onboarding-identity-email {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.onboarding-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-hover);
+}
+.onboarding-note-icon {
+  flex: none;
+  color: var(--warning);
+}
+.onboarding-note-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.onboarding-note-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.onboarding-note-text {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+/* Panel kanan: kanvas mini + kaki (benefit di S1, caption di state lain). */
+.onboarding-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 40px;
+  border-left: 1px solid var(--hairline);
+  background: var(--canvas);
+}
+.onboarding-vignette {
+  flex: 1;
+  display: grid;
+  place-items: center;
+}
+.onboarding-vignette-art {
+  position: relative;
+  width: 300px;
+  height: 236px;
+}
+.onboarding-mock {
+  position: absolute;
+  left: 7px;
+  top: 7px;
+  width: 236px;
+  height: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.onboarding-mock > span {
+  display: block;
+  flex: none;
+  border-radius: 3px;
+  background: var(--border);
+}
+.onboarding-mock > .onboarding-mock-bar {
+  width: 72px;
+  height: 8px;
+  border-radius: 4px;
+}
+.onboarding-mock > .onboarding-mock-hero {
+  height: 64px;
+  border-radius: 6px;
+  background: var(--thumb);
+}
+.onboarding-mock-line {
+  height: 6px;
+}
+.onboarding-mock-line.short {
+  width: 120px;
+}
+.onboarding-mock-back {
+  position: absolute;
+  left: 121px;
+  top: 123px;
+  width: 170px;
+  height: 110px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface);
+  opacity: 0.7;
+}
+.onboarding-selection {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 244px;
+  height: 176px;
+  border: 1.5px solid var(--accent);
+  border-radius: 12px;
+}
+.onboarding-selection > span {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  background: var(--surface);
+}
+.onboarding-selection > span:nth-child(1) {
+  left: -4.5px;
+  top: -4.5px;
+}
+.onboarding-selection > span:nth-child(2) {
+  right: -4.5px;
+  top: -4.5px;
+}
+.onboarding-selection > span:nth-child(3) {
+  left: -4.5px;
+  bottom: -4.5px;
+}
+.onboarding-selection > span:nth-child(4) {
+  right: -4.5px;
+  bottom: -4.5px;
+}
+.onboarding-cursor {
+  position: absolute;
+  left: 233px;
+  top: 185px;
+  color: var(--agent);
+}
+.onboarding-agent-tag {
+  position: absolute;
+  left: 249px;
+  top: 199px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--agent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+.onboarding-benefits {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.onboarding-benefits li {
+  display: flex;
   align-items: center;
-  gap: 16px;
-  text-align: center;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.4;
 }
-.onboarding-success-icon {
-  color: var(--success);
+.onboarding-benefit-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
 }
-.onboarding-success .btn {
-  width: 100%;
+.onboarding-caption {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+/* Tinggi panel 600px seperti desain hanya bila jendela cukup lega; selain itu ikut isi. */
+@media (min-width: 900px) and (min-height: 720px) {
+  .onboarding-panel {
+    min-height: 600px;
+  }
+}
+@media (max-width: 899px) {
+  .onboarding-panel {
+    flex-direction: column;
+    width: min(480px, 100%);
+  }
+  .onboarding-column {
+    flex: none;
+    padding: 32px;
+  }
+  .onboarding-pane {
+    flex: none;
+    padding: 24px 32px;
+    border-left: 0;
+    border-top: 1px solid var(--hairline);
+  }
+  .onboarding-vignette {
+    display: none;
+  }
 }
 @media (max-width: 480px) {
-  .onboarding-card {
+  .onboarding-column {
     padding: 24px;
+  }
+  .onboarding-pane {
+    padding: 20px 24px;
   }
 }
 @media (prefers-reduced-motion: no-preference) {
-  .onboarding-card {
+  .onboarding-panel {
     animation: onboarding-in 150ms ease-out;
   }
 }

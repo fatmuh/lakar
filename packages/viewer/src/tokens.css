@@ -71,6 +71,9 @@
   --warning: #ca8a04;
   --success: #16a34a;
   --success-soft: #16a34a1f;
+  /* Garis tipis & bayangan panel mengambang (first-run-signin-v2: hairline, shadow). */
+  --hairline: #0000000f;
+  --shadow: #0000001a;
 
   --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
@@ -108,4 +111,6 @@
   --warning: #eab308;
   --success: #22c55e;
   --success-soft: #22c55e26;
+  --hairline: #ffffff12;
+  --shadow: #00000080;
 }
