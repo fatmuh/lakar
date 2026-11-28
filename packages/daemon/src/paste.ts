@@ -19,15 +19,19 @@ import { PASTE_NAME_MAX, SvgImportError, importSvg, type KeptAttr, type PasteDro
 import { NO_ACTIVE_DOC_HINT, authorOf, type Session, type Sessions } from './sessions.js';
 import type { AgentSteps } from './agent-undo.js';
 import type { DocStore } from './store.js';
+import { FigmaImportError, figmaBufferBase64, importFigma, type FigmaReport } from './paste/figma.js';
+import { PenImportError, importPen, type PenReport } from './paste/pen.js';
 
-export const PASTE_KINDS = ['svg', 'html'] as const;
+export const PASTE_KINDS = ['svg', 'html', 'figma', 'pen'] as const;
 export type PasteKind = (typeof PASTE_KINDS)[number];
-/** Panjang `content` maksimum (karakter). */
-export const PASTE_CONTENT_MAX = 1_000_000;
+/** Panjang `content` maksimum (karakter; envelope figma base64 bisa besar). */
+export const PASTE_CONTENT_MAX = 8_000_000;
 /** Batas body route paste (JSON dengan escape bisa lebih besar dari isinya). */
-export const PASTE_BODY_LIMIT = 8 * 1024 * 1024;
+export const PASTE_BODY_LIMIT = 16 * 1024 * 1024;
 export const PASTE_DEFAULT_DESCRIPTION = 'Paste SVG';
 export const PASTE_HTML_DESCRIPTION = 'Paste HTML';
+export const PASTE_FIGMA_DESCRIPTION = 'Paste Figma layers';
+export const PASTE_PEN_DESCRIPTION = 'Paste layers';
 export const PASTE_DESCRIPTION_MAX = 200;
 /** Lebar viewport HTML maksimum dan default (tujuan tanpa lebar angka). */
 export const PASTE_WIDTH_MAX = 4096;
@@ -56,9 +60,11 @@ export type PasteBody = z.infer<typeof PasteBody>;
 const PASTE_HINT = `kirim {content: '<svg …>' atau HTML, parentId: ID board/frame, x?, y?, name?, description?, kind?: 'svg'|'html', width?} (content maks ${PASTE_CONTENT_MAX} karakter)`;
 const SVG_HINT = 'content harus dokumen SVG utuh berakar <svg> berisi path/rect/circle/ellipse/line/polyline/polygon';
 const HTML_HINT = 'content harus potongan HTML dengan elemen atau teks yang terlihat (skrip tidak dijalankan, jaringan diblokir)';
+const FIGMA_HINT = 'content harus HTML clipboard Figma (span data-buffer base64 fig-kiwi) atau base64 buffer x-figma-design';
+const PEN_HINT = 'content harus JSON pohon node .pen (objek/array dengan properti type)';
 
 export type SvgPasteReport = { kind: 'svg'; paths: number; kept: KeptAttr[]; dropped: PasteDropped[] };
-export type PasteReport = SvgPasteReport | HtmlReport;
+export type PasteReport = SvgPasteReport | HtmlReport | FigmaReport | PenReport;
 
 /** Port render HTML terisolasi (ChromiumRenderer.snapshotHtml); tidak ada → paste HTML `RENDER_FAILED`. */
 export type HtmlSnapshotter = { snapshotHtml(html: string, opts: { width: number }): Promise<HtmlSnapshot> };
@@ -162,8 +168,27 @@ function pasteParent(doc: LakarDocument | undefined, slug: string, parentId: str
   return parent;
 }
 
-/** Impor sesuai `kind` (HTML: render terisolasi di luar kunci dokumen). */
+/** Impor sesuai `kind` (HTML: render terisolasi di luar kunci dokumen; figma/pen: decode murni tanpa render). */
 async function importContent(opts: PasteRoutesOptions, slug: string, body: PasteBody, onMissing: () => LakarError): Promise<Imported> {
+  if (body.kind === 'figma' || body.kind === 'pen') {
+    try {
+      const imported =
+        body.kind === 'figma'
+          ? importFigma(figmaBufferBase64(body.content) ?? body.content, body.name !== undefined ? { name: body.name } : {})
+          : importPen(body.content, body.name !== undefined ? { name: body.name } : {});
+      const n = countNodes(imported.node);
+      if (n > OPS_MAX) {
+        throw new LakarError('SCHEMA_INVALID', `clipboard ${body.kind} menghasilkan ${n} layer; maks ${OPS_MAX} per paste`, { hint: 'paste seleksi yang lebih kecil' });
+      }
+      return { node: imported.node, report: imported.report, assets: [] };
+    } catch (e) {
+      if (e instanceof LakarError) throw e;
+      if (e instanceof FigmaImportError) throw new LakarError('SCHEMA_INVALID', e.message, { hint: FIGMA_HINT });
+      if (e instanceof PenImportError) throw new LakarError('SCHEMA_INVALID', e.message, { hint: PEN_HINT });
+      if (e instanceof Error) throw new LakarError('SCHEMA_INVALID', `decode clipboard ${body.kind} gagal: ${e.message}`, { hint: body.kind === 'figma' ? FIGMA_HINT : PEN_HINT });
+      throw e;
+    }
+  }
   if ((body.kind ?? 'svg') === 'svg') {
     let imported;
     try {
@@ -207,7 +232,9 @@ async function importContent(opts: PasteRoutesOptions, slug: string, body: Paste
 /** Impor + commit di bawah kunci slug. Dokumen belum dimuat → dibaca dari disk (seperti route ops). */
 async function commitPaste(opts: PasteRoutesOptions, slug: string, body: PasteBody, actor: Actor, onMissing: () => LakarError) {
   const imported = await importContent(opts, slug, body, onMissing);
-  const description = body.description ?? ((body.kind ?? 'svg') === 'html' ? PASTE_HTML_DESCRIPTION : PASTE_DEFAULT_DESCRIPTION);
+  const description =
+    body.description ??
+    (body.kind === 'figma' ? PASTE_FIGMA_DESCRIPTION : body.kind === 'pen' ? PASTE_PEN_DESCRIPTION : (body.kind ?? 'svg') === 'html' ? PASTE_HTML_DESCRIPTION : PASTE_DEFAULT_DESCRIPTION);
   // Slug room: ops hasil import di-commit ke sequencer; refs/created/inverse dari ack broadcast.
   const room = opts.rooms?.get(slug);
   if (room) {

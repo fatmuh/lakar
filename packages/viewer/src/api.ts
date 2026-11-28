@@ -129,7 +129,7 @@ export type RoomPeers = { slug: string; connected: boolean; peers: RoomPeer[]; s
  */
 export type OpsResult = { slug: string; rev: number; created: { id: string; name: string; path: string[] }[]; inverse: DocOp[]; refs: Record<string, string> };
 /** Body paste (route `POST /viewer/docs/:slug/paste`, epic paste-vektor story 3–4; `kind` default `svg`). */
-export type PasteBody = { content: string; parentId: string; kind?: 'svg' | 'html'; x?: number; y?: number; name?: string; description?: string; width?: number };
+export type PasteBody = { content: string; parentId: string; kind?: 'svg' | 'html' | 'figma' | 'pen'; x?: number; y?: number; name?: string; description?: string; width?: number };
 /** Hasil paste: seperti ops (`inverse` untuk undo) + node akar baru dan laporan importer. */
 export type PasteResult = OpsResult & { nodeId: string; report: PasteReport };
 /** Body impor URL (route `POST /viewer/docs/:slug/import-url`, epic adopsi open-pencil story 8). */

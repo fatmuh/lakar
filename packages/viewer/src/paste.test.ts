@@ -170,3 +170,15 @@ describe('paste HTML (story 4, desain rkIyP/GXHxW)', () => {
     expect(pasteReportText(html, 'Card').split('\n').slice(0, 3)).toEqual(['Pasted 14 layers from HTML', 'Auto layout, text and 2 images kept as layers · 1 change in History', 'Not imported (8):']);
   });
 });
+
+describe('clipboard tool desain (spec-paste-design-tools)', () => {
+  it('envelope figma (data-buffer) → kind figma; pen JSON → kind pen; MIME kustom didahulukan', () => {
+    const figmaHtml = '<meta charset="utf-8"><span data-buffer="<!--(figma)ZmlnLWtpd2kAAAAABAAAAA==(/figma)-->"></span>';
+    expect(clipboardPaste({ files: [], text: 'Frame', html: figmaHtml })).toEqual({ figma: figmaHtml });
+    const pen = '{"type":"frame","name":"S","children":[{"type":"text","name":"t"}]}';
+    expect(clipboardPaste({ files: [], text: pen, html: undefined })).toEqual({ pen });
+    expect(clipboardPaste({ files: [], text: 'x', html: figmaHtml, toolBuffer: 'ZmlnLWtpd2kA' })).toEqual({ figma: 'ZmlnLWtpd2kA' });
+    // JSON biasa tanpa node bertipe → bukan pen.
+    expect(clipboardPaste({ files: [], text: '{"a":1}', html: undefined })).toBeUndefined();
+  });
+});
