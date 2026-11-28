@@ -1102,7 +1102,7 @@ export function Viewer({ slug }: { slug: string }) {
       const dt = e.clipboardData;
       if (!dt) return;
       // OpenPencil menulis buffer Kiwi di MIME kustom `application/x-figma-design` (getData → string mentah).
-      const tool = dt.types.includes('application/x-figma-design') ? dt.getData('application/x-figma-design') : undefined;
+      const tool = dt.types?.includes?.('application/x-figma-design') ? dt.getData('application/x-figma-design') : undefined;
       const pick = clipboardPaste({ files: [...dt.files], text: dt.getData('text/plain'), html: dt.getData('text/html'), toolBuffer: tool || undefined });
       if (!pick) return;
       e.preventDefault();
