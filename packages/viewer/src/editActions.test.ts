@@ -454,6 +454,7 @@ describe('shortcut paritas Figma (spec-canvas-shortcuts)', () => {
     expect(v('4', { altKey: true, code: 'Digit4' })).toBeUndefined();
     expect(v('C', { shiftKey: true, code: 'KeyC' })).toEqual({ view: 'comments' });
     expect(v('O', { shiftKey: true, code: 'KeyO' })).toEqual({ view: 'outline' });
+    expect(v('I', { shiftKey: true, code: 'KeyI' })).toEqual({ view: 'tab', tab: 1 });
     expect(v('\\', { ctrlKey: true, altKey: true, code: 'Backslash' })).toEqual({ view: 'cursors' });
     expect(v('O', { ctrlKey: true, shiftKey: true, code: 'KeyO' })).toEqual({ view: 'outline' });
     expect(v('?', { ctrlKey: true, shiftKey: true, code: 'Slash' })).toEqual({ view: 'shortcuts' });

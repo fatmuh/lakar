@@ -618,6 +618,8 @@ export function viewShortcut(e: ShortcutKey): { view: ViewKey; tab?: number } | 
     if (e.code === 'KeyE') return { view: 'toggle-proto' };
     if (e.code === 'KeyC') return { view: 'comments' };
     if (e.code === 'KeyO') return { view: 'outline' };
+    // ⇧I = quick insert di Figma → tab Assets (panel komponen Lakar).
+    if (e.code === 'KeyI') return { view: 'tab', tab: 1 };
     if (e.code === 'Space') return { view: 'present' };
     return undefined;
   }
