@@ -32,6 +32,7 @@ describe('OnboardingGate — S1 `out`', () => {
     expect(screen.getByPlaceholderText('you@example.com')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send link' })).toBeInTheDocument();
     expect(document.body.textContent).toContain('We’ll email you a sign-in link');
+    expect(screen.getAllByRole('listitem')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: 'Continue without an account' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Continue offline' })).not.toBeInTheDocument();
   });
@@ -69,6 +70,7 @@ describe('OnboardingGate — S2 `waiting` (OAuth)', () => {
     await user.click(screen.getByRole('button', { name: 'Continue with Google' }));
     await waitFor(() => expect(title()).toBe('Finish signing in in your browser'));
     expect(document.body.textContent).toContain('a Google sign-in page');
+    expect(document.body.textContent).toContain('Waiting for sign-in…');
     popup.mockRestore();
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -77,7 +79,10 @@ describe('OnboardingGate — S2 `waiting` (OAuth)', () => {
     // Callback tetap datang sesudah Cancel → S5 (E14).
     stream.event('auth', { auth: { signedIn: true, user: USER } });
     await waitFor(() => expect(title()).toBe('You’re signed in'));
-    expect(document.body.textContent).toContain('Ana Putri · ana@studio.id');
+    const account = document.querySelector('.onboarding-account');
+    expect(account?.textContent).toContain('Ana Putri');
+    expect(account?.textContent).toContain('ana@studio.id');
+    expect(account?.textContent).toContain('AP');
     await user.click(screen.getByRole('button', { name: 'Open Lakar' }));
     expect(onDone).toHaveBeenCalledWith('signedIn');
   });
@@ -103,6 +108,8 @@ describe('OnboardingGate — S3 `sent` (magic link)', () => {
     await waitFor(() => expect(title()).toBe('Check your email'));
     expect(bodies).toEqual([{ provider: 'email', email: 'ana@studio.id' }]);
     expect(document.body.textContent).toContain('Open it on this computer');
+    expect(document.querySelector('.onboarding-address')?.textContent).toBe('ana@studio.id');
+    expect(document.body.textContent).toContain('Check your spam or promotions folder');
 
     const resend = screen.getByRole<HTMLButtonElement>('button', { name: /^Resend in / });
     expect(resend.disabled).toBe(true);
@@ -137,7 +144,7 @@ describe('OnboardingGate — S4 `unreachable` / S4b `no-methods`', () => {
   it('providers hilang → pesan koneksi + Try again (onRetry); tanpa jalan keluar lain', async () => {
     const { user, onDone, onRetry } = renderGate({ providers: undefined });
     expect(title()).toBe('Welcome to Lakar');
-    expect(document.body.textContent).toContain('Can’t reach Lakar Cloud');
+    expect(screen.getByRole('note').textContent).toContain('Can’t reach the sign-in service');
     expect(screen.queryByRole('button', { name: 'Continue offline' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));

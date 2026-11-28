@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { activityHub } from './activity';
 import { type AuthStatus, type CloudUser } from './api';
-import { GATE_ERRORS, gateErrorText } from './cloudAuth';
+import { GATE_ERRORS, gateErrorText, initialsOf } from './cloudAuth';
 import { focusWindow } from './desktop';
 import { useNow } from './hooks';
 import { BrandIcon, Icon, LakarMark } from './icons';
@@ -97,100 +97,88 @@ export function OnboardingGate({
     await signin.sendLink(to);
   };
 
-  const brand = (
-    <div className="onboarding-brand">
-      <span className="onboarding-logo" aria-hidden="true">
-        <LakarMark size={24} />
-      </span>
-      <span className="onboarding-wordmark">Lakar</span>
-    </div>
+  const title = (text: string) => (
+    <h1 id="onboarding-title" ref={titleRef} tabIndex={-1} className="onboarding-title">
+      {text}
+    </h1>
   );
-
   let body: ReactElement;
-  if (view === 'unreachable') {
+  /** Isi kaki panel kanan: daftar benefit (S1) atau satu caption per state. */
+  let pane: ReactElement | string;
+  if (view === 'unreachable' || view === 'no-methods') {
+    const unreachable = view === 'unreachable';
     body = (
       <>
-        <div>
-          <h1 id="onboarding-title" ref={titleRef} tabIndex={-1} className="onboarding-title">
-            Welcome to Lakar
-          </h1>
+        <div className="onboarding-heading">
+          {title('Welcome to Lakar')}
           <p className="onboarding-tagline">The design canvas your coding agents drive.</p>
         </div>
-        <p className="cloud-empty onboarding-note" role="note">
-          <Icon name="alert" size={15} />
-          Can’t reach Lakar Cloud right now. Check your connection and try again.
-        </p>
-        <div className="onboarding-actions">
-          <button type="button" className="btn" onClick={onRetry}>
-            <Icon name="rotateCcw" size={14} />
+        <div className="onboarding-stack">
+          <div className="onboarding-note" role="note">
+            <Icon name="alert" size={16} className="onboarding-note-icon" />
+            <div className="onboarding-note-copy">
+              <p className="onboarding-note-title">{unreachable ? 'Can’t reach the sign-in service' : 'Sign-in isn’t available yet'}</p>
+              <p className="onboarding-note-text">
+                {unreachable
+                  ? 'Check your connection, then try again. Sign-in is needed once to set up this install.'
+                  : 'No sign-in methods are available on this service yet.'}
+              </p>
+            </div>
+          </div>
+          <button type="button" className="btn primary onboarding-btn" onClick={onRetry}>
+            <Icon name="refresh" size={15} />
             Try again
           </button>
         </div>
       </>
     );
-  } else if (view === 'no-methods') {
-    body = (
-      <>
-        <div>
-          <h1 id="onboarding-title" ref={titleRef} tabIndex={-1} className="onboarding-title">
-            Welcome to Lakar
-          </h1>
-          <p className="onboarding-tagline">The design canvas your coding agents drive.</p>
-        </div>
-        <p className="cloud-empty onboarding-note" role="note">
-          No sign-in methods are available on this service yet.
-        </p>
-        <div className="onboarding-actions">
-          <button type="button" className="btn" onClick={onRetry}>
-            <Icon name="rotateCcw" size={14} />
-            Try again
-          </button>
-        </div>
-      </>
-    );
+    pane = 'Sign-in is required on first run. Once you’re in, your files work offline.';
   } else if (view === 'waiting') {
     const provider = signin.waitingProvider === 'github' ? 'GitHub' : 'Google';
     body = (
       <>
-        <div>
-          <h1 id="onboarding-title" ref={titleRef} tabIndex={-1} className="onboarding-title">
-            Finish signing in in your browser
-          </h1>
+        <div className="onboarding-heading">
+          {title('Finish signing in in your browser')}
           <p className="onboarding-tagline">We opened a {provider} sign-in page in your default browser. Come back here when you’re done.</p>
         </div>
-        <p className="cloud-note" aria-live="polite">
-          <Icon name="loaderCircle" size={14} className="spin" />
+        <p className="onboarding-status" aria-live="polite">
+          <Icon name="loaderCircle" size={16} className="spin" />
           Waiting for sign-in…
         </p>
-        <div className="onboarding-actions">
-          <button type="button" className="btn" onClick={() => void signin.reopen()}>
+        <div className="onboarding-stack onboarding-stack-tight">
+          <button type="button" className="btn onboarding-btn" onClick={() => void signin.reopen()}>
+            <Icon name="externalLink" size={15} />
             Open browser again
           </button>
-          <button type="button" className="btn" onClick={signin.cancel}>
+          <button type="button" className="btn onboarding-btn ghost" onClick={signin.cancel}>
             Cancel
           </button>
         </div>
       </>
     );
+    pane = 'Leave this window open — Lakar picks up the session as soon as the browser hands it back.';
   } else if (view === 'sent') {
     body = (
       <>
-        <div>
-          <h1 id="onboarding-title" ref={titleRef} tabIndex={-1} className="onboarding-title">
-            Check your email
-          </h1>
-          <p className="onboarding-tagline">
-            We sent a sign-in link to <strong className="onboarding-email">{signin.sentTo}</strong>
-          </p>
-          <p className="onboarding-tagline">Open it on this computer — the link signs in this copy of Lakar and expires in 15 minutes.</p>
+        <div className="onboarding-heading onboarding-heading-badge">
+          <span className="onboarding-badge" aria-hidden="true">
+            <Icon name="mailCheck" size={20} />
+          </span>
+          {title('Check your email')}
+          <div className="onboarding-sent-body">
+            <p className="onboarding-tagline">We sent a sign-in link to</p>
+            <strong className="onboarding-address">{signin.sentTo}</strong>
+            <p className="onboarding-tagline">Open it on this computer — the link signs in this copy of Lakar and expires in 15 minutes.</p>
+          </div>
         </div>
-        <div className="onboarding-actions">
-          <button type="button" className="btn" disabled={resendIn > 0} onClick={() => void send(signin.sentTo)}>
+        <div className="onboarding-stack onboarding-stack-tight">
+          <button type="button" className="btn onboarding-btn" disabled={resendIn > 0} onClick={() => void send(signin.sentTo)}>
+            <Icon name="refresh" size={15} />
             {resendIn > 0 ? `Resend in ${Math.floor(resendIn / 60_000)}:${String(Math.ceil((resendIn % 60_000) / 1000)).padStart(2, '0')}` : 'Resend'}
           </button>
           <button
             type="button"
-            className="btn"
+            className="btn onboarding-btn ghost"
             onClick={() => {
               setEmail(signin.sentTo);
               setEmailError(undefined);
@@ -200,52 +188,50 @@ export function OnboardingGate({
             Use a different email
           </button>
         </div>
+        <p className="onboarding-hint">Not there? Check your spam or promotions folder.</p>
       </>
     );
+    pane = 'One link, one device. Nothing to remember, nothing stored but the session.';
   } else if (view === 'success') {
     const u = successUser!;
     const name = u.name?.trim();
     body = (
-      <div className="onboarding-success">
-        <Icon name="circleCheck" size={32} className="onboarding-success-icon" />
-        <div>
-          <h1 id="onboarding-title" ref={titleRef} tabIndex={-1} className="onboarding-title">
-            You’re signed in
-          </h1>
-          <p className="onboarding-tagline">{name ? `${name} · ${u.email}` : u.email}</p>
+      <>
+        <div className="onboarding-heading onboarding-heading-badge">
+          <span className="onboarding-badge success" aria-hidden="true">
+            <Icon name="circleCheck" size={20} />
+          </span>
+          {title('You’re signed in')}
+          {(name || u.email) && (
+            <div className="onboarding-account">
+              <span className="onboarding-avatar" aria-hidden="true">
+                {initialsOf(u)}
+              </span>
+              <span className="onboarding-identity">
+                <span className="onboarding-identity-name">{name || u.email}</span>
+                {name && <span className="onboarding-identity-email">{u.email}</span>}
+              </span>
+            </div>
+          )}
         </div>
-        <button type="button" className="btn primary" data-autofocus onClick={() => onDone('signedIn')}>
+        <button type="button" className="btn primary onboarding-btn" data-autofocus onClick={() => onDone('signedIn')}>
           Open Lakar
+          <Icon name="arrowRight" size={15} />
         </button>
-      </div>
+      </>
     );
+    pane = 'Your workspace is ready. Files stay local; the cloud only carries sharing and rooms.';
   } else {
-    // S1 `out`: benefit + provider + email + skip (semua metode setara visual — tanpa `primary`).
+    // S1 `out`: provider + email (semua metode setara visual); benefit pindah ke panel kanan.
     body = (
       <>
-        <div>
-          <h1 id="onboarding-title" ref={titleRef} tabIndex={-1} className="onboarding-title">
-            Welcome to Lakar
-          </h1>
-          <p className="onboarding-tagline">The design canvas your coding agents drive.</p>
+        <div className="onboarding-heading">
+          {title('Welcome to Lakar')}
+          <p className="onboarding-tagline">The design canvas your coding agents drive. Sign in once to get started.</p>
         </div>
-        <ul className="onboarding-benefits">
-          <li>
-            <Icon name="link" size={16} />
-            Share snapshots with a link — viewers never need an account.
-          </li>
-          <li>
-            <Icon name="radio" size={16} />
-            Review designs live with others in rooms.
-          </li>
-          <li>
-            <Icon name="shieldCheck" size={16} />
-            Your files stay on this device.
-          </li>
-        </ul>
         <div className="onboarding-providers">
           {oauth.map((p) => (
-            <button key={p} type="button" className="btn cloud-btn" disabled={signin.busy !== undefined} onClick={() => void signin.start(p)}>
+            <button key={p} type="button" className="btn onboarding-btn" disabled={signin.busy !== undefined} onClick={() => void signin.start(p)}>
               <BrandIcon name={p} size={16} />
               {signin.busy === p ? 'Opening…' : p === 'google' ? 'Continue with Google' : 'Continue with GitHub'}
             </button>
@@ -257,7 +243,7 @@ export function OnboardingGate({
           )}
           {offered('email') && (
             <form
-              className="cloud-email onboarding-email"
+              className="onboarding-email"
               noValidate
               onSubmit={(e) => {
                 e.preventDefault();
@@ -270,9 +256,9 @@ export function OnboardingGate({
                 void send(value);
               }}
             >
-              <div className="onboarding-email-row">
-                <label className="input onboarding-email-field">
-                  <Icon name="mail" size={14} />
+              <div className="onboarding-email-field">
+                <label className="onboarding-email-input">
+                  <Icon name="mail" size={15} />
                   <input
                     type="email"
                     aria-label="Email address"
@@ -285,29 +271,78 @@ export function OnboardingGate({
                     }}
                   />
                 </label>
-                <button type="submit" className="btn" disabled={signin.busy !== undefined}>
+                <button type="submit" className="btn primary onboarding-email-send" disabled={signin.busy !== undefined}>
                   {signin.busy === 'email' ? 'Sending…' : 'Send link'}
+                  {signin.busy !== 'email' && <Icon name="arrowRight" size={14} />}
                 </button>
               </div>
-              <p
-                id="onboarding-email-hint"
-                className={formError ? 'onboarding-email-hint danger' : 'onboarding-email-hint'}
-                role={formError ? 'alert' : undefined}
-              >
-                {formError ?? 'We’ll email you a sign-in link. No password needed.'}
+              <p id="onboarding-email-hint" className={formError ? 'onboarding-hint danger' : 'onboarding-hint'} role={formError ? 'alert' : undefined}>
+                {formError ?? 'We’ll email you a sign-in link — no password needed.'}
               </p>
             </form>
           )}
         </div>
       </>
     );
+    pane = (
+      <ul className="onboarding-benefits">
+        <li>
+          <span className="onboarding-benefit-icon" aria-hidden="true">
+            <Icon name="link" size={14} />
+          </span>
+          Share snapshots by link — viewers never need an account.
+        </li>
+        <li>
+          <span className="onboarding-benefit-icon" aria-hidden="true">
+            <Icon name="radio" size={14} />
+          </span>
+          Review designs live with others in rooms.
+        </li>
+        <li>
+          <span className="onboarding-benefit-icon" aria-hidden="true">
+            <Icon name="shieldCheck" size={14} />
+          </span>
+          Your files stay on this device.
+        </li>
+      </ul>
+    );
   }
 
   return (
     <main className="onboarding" aria-labelledby="onboarding-title">
-      <div className="onboarding-card">
-        {brand}
-        {body}
+      <div className="onboarding-panel">
+        <div className="onboarding-column">
+          <div className="onboarding-brand">
+            <span className="onboarding-logo" aria-hidden="true">
+              <LakarMark size={16} />
+            </span>
+            <span className="onboarding-wordmark">Lakar</span>
+          </div>
+          <div className="onboarding-content">{body}</div>
+        </div>
+        <div className="onboarding-pane">
+          {/* Vinyet kanvas dekoratif: frame terpilih + kursor agen (bukan konten). */}
+          <div className="onboarding-vignette" aria-hidden="true">
+            <div className="onboarding-vignette-art">
+              <div className="onboarding-mock">
+                <span className="onboarding-mock-bar" />
+                <span className="onboarding-mock-hero" />
+                <span className="onboarding-mock-line" />
+                <span className="onboarding-mock-line short" />
+              </div>
+              <div className="onboarding-mock-back" />
+              <div className="onboarding-selection">
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
+              <Icon name="pointer" size={16} className="onboarding-cursor" />
+              <span className="onboarding-agent-tag">agent</span>
+            </div>
+          </div>
+          {typeof pane === 'string' ? <p className="onboarding-caption">{pane}</p> : pane}
+        </div>
       </div>
     </main>
   );
