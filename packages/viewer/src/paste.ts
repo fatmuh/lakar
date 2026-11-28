@@ -8,7 +8,8 @@ export type PasteDropKind = 'element' | 'attribute' | 'value' | 'request' | 'pro
 export type PasteDrop = { kind: PasteDropKind; name: string; count: number };
 export type SvgPasteReport = { kind: 'svg'; paths: number; kept: string[]; dropped: PasteDrop[] };
 export type HtmlPasteReport = { kind: 'html'; layers: number; autoLayout: number; texts: number; images: number; vectors: number; dropped: PasteDrop[] };
-export type PasteReport = SvgPasteReport | HtmlPasteReport;
+export type ToolPasteReport = { kind: 'figma' | 'pen'; layers: number; autoLayout: number; texts: number; images?: number; vectors?: number; dropped: PasteDrop[] };
+export type PasteReport = SvgPasteReport | HtmlPasteReport | ToolPasteReport;
 
 /**
  * Teks yang dianggap SVG: elemen pertama `<svg` sesudah BOM, spasi, komentar, prolog `<?xml …?>`, dan DOCTYPE.
@@ -38,17 +39,38 @@ export function clipboardSvg<F extends { type: string; name: string }>(input: { 
   return text ? { text } : undefined;
 }
 
+/** HTML clipboard tool desain: `<span data-buffer>` berisi payload fig-kiwi (Figma dan yang kompatibel). */
+export const isFigmaEnvelope = (html: string | undefined): boolean => !!html && /data-buffer="<!--\(figma\)|data-buffer="[^"]{100,}"/i.test(html);
+
+/** text/plain JSON pohon node .pen (pen.dev): objek/array dengan properti `type` string di dalamnya. */
+export function isPenJson(text: string | undefined): boolean {
+  const s = text?.trim();
+  if (!s || (s[0] !== '{' && s[0] !== '[') || !/"type"\s*:/.test(s)) return false;
+  try {
+    const p: unknown = JSON.parse(s);
+    const nodes = Array.isArray(p) ? p : [p, ...(['objects', 'children', 'layers', 'nodes'] as const).map((k) => (p as Record<string, unknown>)?.[k])].flat().filter(Boolean);
+    return nodes.some((n) => !!n && typeof n === 'object' && typeof (n as { type?: unknown }).type === 'string');
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Pilihan paste dari clipboard (story 4): SVG lebih dulu (file, lalu teks; editor kode juga menaruh `text/html`
- * berwarna untuk teks SVG), lalu `text/html` yang berisi markup; selain itu undefined (paste dibiarkan).
+ * Pilihan paste dari clipboard (story 4 + spec-paste-design-tools): SVG lebih dulu (file, lalu teks), lalu
+ * envelope Figma (`data-buffer` kiwi), JSON .pen, lalu `text/html` yang berisi markup; selain itu undefined.
  */
 export function clipboardPaste<F extends { type: string; name: string }>(input: {
   files: readonly F[];
   text: string | undefined;
   html: string | undefined;
-}): { file: F; name: string | undefined } | { text: string } | { html: string } | undefined {
+  /** Base64 buffer dari MIME kustom (application/x-figma-design, dst.) bila viewer membacanya. */
+  toolBuffer?: string | undefined;
+}): { file: F; name: string | undefined } | { text: string } | { html: string } | { figma: string } | { pen: string } | undefined {
+  if (input.toolBuffer) return { figma: input.toolBuffer };
   const svg = clipboardSvg(input);
   if (svg) return svg;
+  if (isFigmaEnvelope(input.html)) return { figma: input.html! };
+  if (isPenJson(input.text)) return { pen: input.text! };
   // Kode HTML disalin dari editor/chat: text/plain berisi markup (text/html, bila ada, hanya pewarnaan sintaks).
   if (htmlSource(input.text)) return { html: input.text! };
   const html = input.html?.trim() ? input.html : undefined;
@@ -142,8 +164,11 @@ export function joinList(items: readonly string[]): string {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-/** Judul toast/report: "Pasted SVG as 4 paths" / "Pasted 14 layers from HTML". */
-export const pasteTitle = (r: PasteReport): string => (r.kind === 'html' ? `Pasted ${plural(r.layers, 'layer')} from HTML` : `Pasted SVG as ${plural(r.paths, 'path')}`);
+/** Judul toast/report: "Pasted SVG as 4 paths" / "Pasted 14 layers from HTML" / "Pasted 8 layers from Figma". */
+export const pasteTitle = (r: PasteReport): string =>
+  r.kind === 'svg'
+    ? `Pasted SVG as ${plural(r.paths, 'path')}`
+    : `Pasted ${plural(r.layers, 'layer')} from ${r.kind === 'html' ? 'HTML' : r.kind === 'figma' ? 'Figma' : 'a design tool'}`;
 
 const dropName = (d: PasteReport['dropped'][number]) => (d.kind === 'value' ? `${d.name} value` : d.name);
 /** Maks nama yang disebut di toast; sisanya diringkas menjadi "N more". */
@@ -151,7 +176,7 @@ const TOAST_NAMES_MAX = 4;
 
 /** Deskripsi toast: "Kept fill-rule, stroke caps and dashes. Not imported: filter, <mask> (no matching property)." */
 export function pasteDescription(r: PasteReport): string {
-  if (r.kind === 'html') return htmlKept(r);
+  if (r.kind !== 'svg') return htmlKept(r);
   const parts: string[] = [];
   const kept = r.kept.map((k) => KEPT_LABELS[k] ?? k);
   if (kept.length) parts.push(`Kept ${joinList(kept)}.`);
@@ -166,7 +191,7 @@ export function pasteDescription(r: PasteReport): string {
 }
 
 /** "Auto layout, text and 2 images kept as layers" (desain rkIyP); tanpa rincian → "Layers kept". */
-export function htmlKept(r: HtmlPasteReport): string {
+export function htmlKept(r: Pick<HtmlPasteReport, 'autoLayout' | 'texts'> & { images?: number; vectors?: number }): string {
   const parts = [r.autoLayout ? 'auto layout' : '', r.texts ? 'text' : '', r.images ? plural(r.images, 'image') : '', r.vectors ? plural(r.vectors, 'vector') : ''].filter(Boolean);
   if (!parts.length) return 'Layers kept';
   const s = `${joinList(parts)} kept as layers`;
@@ -225,6 +250,12 @@ function htmlItems(r: HtmlPasteReport): PasteReportItem[] {
 /** Baris "Not imported" Paste Report (w2am0). */
 export function pasteReportItems(r: PasteReport): PasteReportItem[] {
   if (r.kind === 'html') return htmlItems(r);
+  if (r.kind === 'figma' || r.kind === 'pen')
+    return r.dropped.map((d) => ({
+      icon: 'code' as const,
+      what: d.count > 1 ? `${d.count} × ${dropName(d)}` : dropName(d),
+      why: 'No matching Lakar layer',
+    }));
   return r.dropped.map((d) => ({
     icon: d.kind === 'element' ? 'code' : 'paintbrush',
     what: d.count > 1 ? `${d.count} × ${dropName(d)}` : dropName(d),
@@ -234,12 +265,12 @@ export function pasteReportItems(r: PasteReport): PasteReportItem[] {
 
 /** Deskripsi header report: "4 paths in “Icon / Rocket” · 1 change in History" / "Auto layout and text kept as layers · 1 change in History". */
 export const pasteReportDescription = (r: PasteReport, layer: string): string =>
-  r.kind === 'html' ? `${htmlKept(r)} · 1 change in History` : `${plural(r.paths, 'path')} in “${layer}” · 1 change in History`;
+  r.kind === 'svg' ? `${plural(r.paths, 'path')} in “${layer}” · 1 change in History` : `${htmlKept(r)} · 1 change in History`;
 
 /** Teks "Copy report". */
 export function pasteReportText(r: PasteReport, layer: string): string {
   const items = pasteReportItems(r);
-  const lines = r.kind === 'html' ? [pasteTitle(r), pasteReportDescription(r, layer)] : [pasteTitle(r), pasteReportDescription(r, layer), pasteDescription(r)];
+  const lines = r.kind === 'svg' ? [pasteTitle(r), pasteReportDescription(r, layer), pasteDescription(r)] : [pasteTitle(r), pasteReportDescription(r, layer)];
   if (items.length) lines.push(`Not imported (${items.length}):`, ...items.map((i) => `- ${i.what}: ${i.why}`));
   return lines.join('\n');
 }

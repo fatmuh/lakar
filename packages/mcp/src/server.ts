@@ -288,8 +288,8 @@ export function formatExportSvg(data: ExportSvgResult): CallToolResult['content'
 
 /** Deskripsi tool `paste` (epic paste-vektor story 3–4, AD-15). */
 export const PASTE_DESCRIPTION =
-  'Tempel SVG atau HTML ke board/frame dokumen aktif sebagai layer yang bisa diedit (importer yang sama dengan Ctrl+V di viewer; hasil identik). ' +
-  'content = dokumen SVG utuh berakar <svg> (kind "svg", default) atau potongan HTML (kind "html"); parentId = ID board atau frame tujuan; x/y opsional (default: tengah parent; parent auto layout → ditambahkan di akhir tanpa x/y); ' +
+  'Tempel SVG, HTML, atau clipboard tool desain ke board/frame dokumen aktif sebagai layer yang bisa diedit (importer yang sama dengan Ctrl+V di viewer; hasil identik). ' +
+  'content = dokumen SVG utuh berakar <svg> (kind "svg", default); potongan HTML (kind "html"); HTML envelope clipboard Figma atau base64 buffer fig-kiwi (kind "figma" — mencakup OpenPencil dan tool kompatibel); atau JSON pohon node .pen (kind "pen"); parentId = ID board atau frame tujuan; x/y opsional (default: tengah parent; parent auto layout → ditambahkan di akhir tanpa x/y); ' +
   'name opsional (nama layer akar); description opsional (label riwayat, default "Paste SVG"/"Paste HTML"); width opsional (lebar viewport HTML, default lebar tujuan). ' +
   'HTML dirender di Chromium terisolasi (JavaScript mati, jaringan diblokir; gambar hanya data URI): flex/grid → auto layout, teks → text, <img> data → rect gambar, <svg> → path, tag semantik (nav, h1, p, button, …) → tag; ' +
   'computed style dipetakan ke properti Lakar; HTML/CSS mentah tidak disimpan. Report HTML: {kind:"html", layers, autoLayout, texts, images, vectors, dropped:[{kind: element|attribute|request|property|value|font|layout, name, count}]}. ' +
@@ -697,7 +697,7 @@ export function createLakarMcpServer(backend: string | LakarTransport, opts: Lak
         y: z.number().optional().describe('posisi y di parent (default tengah)'),
         name: z.string().optional().describe('nama layer akar (default <title> SVG atau "SVG"; HTML: aria-label/id/kelas/tag akar)'),
         description: z.string().optional().describe('label riwayat (default "Paste SVG"/"Paste HTML")'),
-        kind: z.enum(['svg', 'html']).optional().describe("jenis isi: 'svg' (default) atau 'html'"),
+        kind: z.enum(['svg', 'html', 'figma', 'pen']).optional().describe("jenis isi: 'svg' (default), 'html', 'figma' (clipboard Figma/OpenPencil), atau 'pen' (JSON .pen)"),
         width: z.number().optional().describe('HTML: lebar viewport px (default lebar board/frame tujuan)'),
       }).strict(),
     },

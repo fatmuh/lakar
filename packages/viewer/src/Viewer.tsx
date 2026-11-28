@@ -1030,7 +1030,7 @@ export function Viewer({ slug }: { slug: string }) {
   /** Entri undo milik paste yang toast-nya tampil ("Undo paste" hanya bila entri ini masih teratas). */
   const pasteEntry = useRef<unknown>(undefined);
   const pasteContent = useCallback(
-    (content: string, kind: 'svg' | 'html', name?: string) => {
+    (content: string, kind: 'svg' | 'html' | 'figma' | 'pen', name?: string) => {
       const d = docRef.current;
       if (!editableRef.current || !d) return;
       // Satu tulis viewer sekaligus: paste tidak dibuang diam-diam (preventDefault sudah dipanggil).
@@ -1044,15 +1044,15 @@ export function Viewer({ slug }: { slug: string }) {
         return;
       }
       editing.current++;
-      api.paste(slug, { content, parentId: target.parentId, ...(kind === 'html' ? { kind } : {}), ...(name ? { name } : {}) }).then(
+      api.paste(slug, { content, parentId: target.parentId, ...(kind !== 'svg' ? { kind } : {}), ...(name ? { name } : {}) }).then(
         (r) => {
           editing.current--;
-          setStacks(recordCommit(stacks.current, r.inverse, kind === 'html' ? 'Paste HTML' : 'Paste SVG', Date.now()));
+          setStacks(recordCommit(stacks.current, r.inverse, kind === 'html' ? 'Paste HTML' : kind === 'svg' ? 'Paste SVG' : 'Paste layers', Date.now()));
           pasteEntry.current = stacks.current.undo[stacks.current.undo.length - 1];
           pendingSelect.current = r.nodeId;
           setSelectedId(r.nodeId);
           loadDoc(true);
-          setPasteToast({ key: Date.now(), report: r.report, layer: r.created.find((c) => c.id === r.nodeId)?.name ?? name ?? (kind === 'html' ? 'HTML' : 'SVG'), nodeId: r.nodeId });
+          setPasteToast({ key: Date.now(), report: r.report, layer: r.created.find((c) => c.id === r.nodeId)?.name ?? name ?? (kind === 'html' ? 'HTML' : kind === 'svg' ? 'SVG' : 'layers'), nodeId: r.nodeId });
         },
         (e) => {
           editing.current--;
@@ -1101,10 +1101,14 @@ export function Viewer({ slug }: { slug: string }) {
       if (typingTarget(e) || document.querySelector('.modal-scrim, .menu-layer')) return;
       const dt = e.clipboardData;
       if (!dt) return;
-      const pick = clipboardPaste({ files: [...dt.files], text: dt.getData('text/plain'), html: dt.getData('text/html') });
+      // OpenPencil menulis buffer Kiwi di MIME kustom `application/x-figma-design` (getData → string mentah).
+      const tool = dt.types?.includes?.('application/x-figma-design') ? dt.getData('application/x-figma-design') : undefined;
+      const pick = clipboardPaste({ files: [...dt.files], text: dt.getData('text/plain'), html: dt.getData('text/html'), toolBuffer: tool || undefined });
       if (!pick) return;
       e.preventDefault();
       if ('html' in pick) pasteContent(pick.html, 'html');
+      else if ('figma' in pick) pasteContent(pick.figma, 'figma');
+      else if ('pen' in pick) pasteContent(pick.pen, 'pen');
       else if ('text' in pick) pasteContent(pick.text, 'svg');
       else
         void pick.file.text().then(
