@@ -60,6 +60,7 @@ import {
   nudgeOps,
   parentIdOf,
   planAction,
+  resizeOps,
   rotateOps,
   selectAllIds,
   selectInverseIds,
@@ -1327,6 +1328,8 @@ export function Viewer({ slug }: { slug: string }) {
           name: g.name,
           type: g.type,
           ...(typeof s.rotation === 'number' ? { rotation: s.rotation } : {}),
+          ...(typeof s.width === 'number' ? { width: s.width } : {}),
+          ...(typeof s.height === 'number' ? { height: s.height } : {}),
           ...(typeof s.weight === 'number' ? { weight: s.weight } : {}),
           ...(typeof s.style === 'string' ? { style: s.style } : {}),
           ...(typeof s.decoration === 'string' ? { decoration: s.decoration } : {}),
@@ -1405,6 +1408,14 @@ export function Viewer({ slug }: { slug: string }) {
       }
       if ('rotate' in s) {
         const plan = rotateOps(styledNodes(), s.rotate);
+        if (plan) {
+          e.preventDefault();
+          void runPlan(plan, false);
+        }
+        return;
+      }
+      if ('resize' in s) {
+        const plan = resizeOps(styledNodes(), s.resize[0], s.resize[1]);
         if (plan) {
           e.preventDefault();
           void runPlan(plan, false);

@@ -503,9 +503,9 @@ const DISTRIBUTE_CODES: Record<string, EditAction> = { KeyH: 'distribute-h', Key
 const ARROWS: Record<string, readonly [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
 /** Gaya teks paritas Figma (spec-canvas-shortcuts): dipetakan ke patch properti node teks oleh `textStyleOps`. */
-export type TextStyleKey = 'bold' | 'italic' | 'underline' | 'size+' | 'size-' | 'weight+' | 'weight-' | 'spacing+' | 'spacing-' | 'leading+' | 'leading-';
+export type TextStyleKey = 'bold' | 'italic' | 'underline' | 'size+' | 'size-' | 'weight+' | 'weight-' | 'spacing+' | 'spacing-' | 'leading+' | 'leading-' | 'align-left' | 'align-right';
 
-/** Intent edit yang bukan `EditAction` langsung: seleksi navigasi, rename, rotate, dan gaya teks. */
+/** Intent edit yang bukan `EditAction` langsung: seleksi navigasi, rename, rotate, resize, dan gaya teks. */
 export type ShortcutIntent =
   | { action: EditAction }
   | { selectAll: true }
@@ -517,6 +517,7 @@ export type ShortcutIntent =
   | { gotoMain: true }
   | { multiVariant: true }
   | { rotate: number }
+  | { resize: readonly [number, number] }
   | { textStyle: TextStyleKey }
   | { nudge: readonly [number, number] };
 
@@ -527,6 +528,7 @@ export type ShortcutIntent =
  * Ctrl/⌘+A pilih semua, Ctrl/⌘+Shift+A inverse, Shift+A auto layout, Ctrl/⌘+Alt+Shift+R fit content,
  * Enter masuk / Shift+Enter atau `\` ke parent, Tab/Shift+Tab sibling, Ctrl/⌘+R rename,
  * Ctrl/⌘+Alt+Shift+K ke master, Q multi-edit varian, Ctrl/⌘+Alt+panah putar 1° (+Shift 15°),
+ * Ctrl/⌘+Alt+L/R rata teks, Alt+panah resize 1px (Shift 10px),
  * Ctrl/⌘+B/I/U dan <>/, untuk gaya teks, panah (Shift = 10px) nudge. `code` dipakai untuk Alt/&lt;&gt; (aman macOS).
  */
 export function shortcutAction(e: ShortcutKey): ShortcutIntent | undefined {
@@ -538,7 +540,17 @@ export function shortcutAction(e: ShortcutKey): ShortcutIntent | undefined {
     if (e.shiftKey) return e.code === 'KeyK' ? { gotoMain: true } : e.code === 'KeyR' ? { action: 'fit-content' } : undefined;
     if (e.code === 'Comma' || e.code === 'Period') return { textStyle: `weight${e.code === 'Comma' ? '-' : '+'}` };
     if (e.key === 'Enter') return undefined;
-    return e.code === 'KeyK' ? { action: 'create-component' } : e.code === 'KeyB' ? { action: 'detach' } : e.code === 'KeyG' ? { action: 'wrap-frame' } : undefined;
+    return e.code === 'KeyK'
+      ? { action: 'create-component' }
+      : e.code === 'KeyB'
+        ? { action: 'detach' }
+        : e.code === 'KeyG'
+          ? { action: 'wrap-frame' }
+          : e.code === 'KeyL'
+            ? { textStyle: 'align-left' }
+            : e.code === 'KeyR'
+              ? { textStyle: 'align-right' }
+              : undefined;
   }
   if (!mod && !e.altKey && !e.shiftKey && (e.key === 'Delete' || e.key === 'Backspace')) return { action: 'delete' };
   if (mod && !e.altKey) {
@@ -562,6 +574,9 @@ export function shortcutAction(e: ShortcutKey): ShortcutIntent | undefined {
   if (e.altKey && !mod) {
     if (e.code === 'Comma' || e.code === 'Period') return { textStyle: `${e.shiftKey ? 'leading' : 'spacing'}${e.code === 'Comma' ? '-' : '+'}` };
     if (e.shiftKey && e.code === 'KeyA') return { action: 'unlayout' };
+    // Alt+panah: resize 1px (Shift 10px) — →/↓ membesar, ←/↑ mengecil (paritas Figma).
+    const rs = ARROWS[e.key];
+    if (rs) return { resize: [rs[0] * (e.shiftKey ? 10 : 1), rs[1] * (e.shiftKey ? 10 : 1)] };
     const a = (e.shiftKey ? DISTRIBUTE_CODES : ALIGN_CODES)[e.code];
     return a ? { action: a } : undefined;
   }
@@ -602,6 +617,7 @@ export function viewShortcut(e: ShortcutKey): { view: ViewKey; tab?: number } | 
   if (e.shiftKey && !mod && !e.altKey) {
     if (e.code === 'KeyE') return { view: 'toggle-proto' };
     if (e.code === 'KeyC') return { view: 'comments' };
+    if (e.code === 'KeyO') return { view: 'outline' };
     if (e.code === 'Space') return { view: 'present' };
     return undefined;
   }
@@ -646,8 +662,26 @@ export function siblingIdOf(scene: readonly GeoNode[], ids: readonly string[], d
 
 // --- Op dari nilai tersimpan (rotate, gaya teks) ---
 
-/** Node untuk `rotateOps`/`textStyleOps`: id + properti tersimpan yang relevan (dari `findNode`, bukan geometri). */
-export type StyledNode = { id: string; name: string; type: string; rotation?: number; weight?: number; style?: string; decoration?: string; size?: number; lineHeight?: number; letterSpacing?: number };
+/** Node untuk `rotateOps`/`resizeOps`/`textStyleOps`: id + properti tersimpan yang relevan (dari `findNode`, bukan geometri). */
+export type StyledNode = { id: string; name: string; type: string; rotation?: number; width?: number; height?: number; weight?: number; style?: string; decoration?: string; size?: number; lineHeight?: number; letterSpacing?: number };
+
+/** Alt+panah (paritas Figma): resize 1px/10px — →/↓ membesar, ←/↑ mengecil; board/komposit dan non-angka (hug/fill) dilewati. */
+export function resizeOps(nodes: readonly StyledNode[], dw: number, dh: number): EditPlan | undefined {
+  const sizable = nodes.filter((n) => n.type !== 'board' && !n.id.includes('/'));
+  const ops: DocOp[] = [];
+  const changed: StyledNode[] = [];
+  for (const n of sizable) {
+    const patch: Record<string, unknown> = {};
+    if (dw !== 0 && typeof n.width === 'number') patch.width = Math.max(1, n.width + dw);
+    if (dh !== 0 && typeof n.height === 'number') patch.height = Math.max(1, n.height + dh);
+    if (Object.keys(patch).length) {
+      ops.push({ op: 'update', id: n.id, patch });
+      changed.push(n);
+    }
+  }
+  if (!ops.length) return undefined;
+  return { ops, label: label(changed.length === 1 ? `Resize ${changed[0]!.name}` : `Resize ${changed.length} layers`) };
+}
 
 /** Ctrl/⌘+Alt+panah: `rotation += deg` pada tiap node terpilih yang bisa diputar (bukan board/alamat komposit). */
 export function rotateOps(nodes: readonly StyledNode[], deg: number): EditPlan | undefined {
@@ -677,6 +711,8 @@ export function textStyleOps(nodes: readonly StyledNode[], key: TextStyleKey): E
     if (key === 'bold') patch.weight = (t.weight ?? 400) >= 700 ? 400 : 700;
     else if (key === 'italic') patch.style = t.style === 'italic' ? 'normal' : 'italic';
     else if (key === 'underline') patch.decoration = t.decoration === 'underline' ? 'none' : 'underline';
+    else if (key === 'align-left') patch.align = 'left';
+    else if (key === 'align-right') patch.align = 'right';
     else if (key.startsWith('size')) patch.size = typeof t.size === 'number' ? nextSize(t.size, key === 'size+' ? 1 : -1) : undefined;
     else if (key.startsWith('weight')) {
       const w = (t.weight ?? 400) + (key === 'weight+' ? 100 : -100);

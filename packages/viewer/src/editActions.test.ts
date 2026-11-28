@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Box, GeoNode } from './gesture.js';
-import { actionState, enterChildId, nudgeNodes, nudgeOps, normalizeEditedText, parentIdOf, planAction, rotateOps, selectAllIds, selectInverseIds, selectionAfter, shortcutAction, siblingIdOf, textEditPlan, textStyleOps, topMost, viewShortcut } from './editActions.js';
+import { actionState, enterChildId, nudgeNodes, nudgeOps, normalizeEditedText, parentIdOf, planAction, resizeOps, rotateOps, selectAllIds, selectInverseIds, selectionAfter, shortcutAction, siblingIdOf, textEditPlan, textStyleOps, topMost, viewShortcut } from './editActions.js';
 import { indexGeo } from './gesture.js';
 
 const node = (id: string, box: Box, opts: Partial<GeoNode> = {}): GeoNode => ({
@@ -433,6 +433,18 @@ describe('shortcut paritas Figma (spec-canvas-shortcuts)', () => {
     expect(k('<', { ctrlKey: true, altKey: true, code: 'Comma' })).toEqual({ textStyle: 'weight-' });
     expect(k(',', { altKey: true, code: 'Comma' })).toEqual({ textStyle: 'spacing-' });
     expect(k('>', { altKey: true, shiftKey: true, code: 'Period' })).toEqual({ textStyle: 'leading+' });
+    expect(k('l', { ctrlKey: true, altKey: true, code: 'KeyL' })).toEqual({ textStyle: 'align-left' });
+    expect(k('r', { metaKey: true, altKey: true, code: 'KeyR' })).toEqual({ textStyle: 'align-right' });
+  });
+
+  it('resize Alt+panah 1px (Shift 10px)', () => {
+    expect(k('ArrowRight', { altKey: true })).toEqual({ resize: [1, 0] });
+    expect(k('ArrowLeft', { altKey: true })).toEqual({ resize: [-1, 0] });
+    expect(k('ArrowDown', { altKey: true, shiftKey: true })).toEqual({ resize: [0, 10] });
+    expect(k('ArrowUp', { altKey: true })).toEqual({ resize: [0, -1] });
+    // Tanpa Alt tetap nudge; Alt+Shift+A tetap unlayout.
+    expect(k('ArrowRight', { altKey: false })).toEqual({ nudge: [1, 0] });
+    expect(k('A', { altKey: true, shiftKey: true, code: 'KeyA' })).toEqual({ action: 'unlayout' });
   });
 
   it('kunci tampilan: tab, proto, komentar, kursor, outline, panel, present, F6', () => {
@@ -440,6 +452,7 @@ describe('shortcut paritas Figma (spec-canvas-shortcuts)', () => {
     expect(v('1', { altKey: true, code: 'Digit1' })).toEqual({ view: 'tab', tab: 0 });
     expect(v('4', { altKey: true, code: 'Digit4' })).toEqual({ view: 'tab', tab: 3 });
     expect(v('C', { shiftKey: true, code: 'KeyC' })).toEqual({ view: 'comments' });
+    expect(v('O', { shiftKey: true, code: 'KeyO' })).toEqual({ view: 'outline' });
     expect(v('\\', { ctrlKey: true, altKey: true, code: 'Backslash' })).toEqual({ view: 'cursors' });
     expect(v('O', { ctrlKey: true, shiftKey: true, code: 'KeyO' })).toEqual({ view: 'outline' });
     expect(v('?', { ctrlKey: true, shiftKey: true, code: 'Slash' })).toEqual({ view: 'shortcuts' });
@@ -524,6 +537,17 @@ describe('plan aksi baru (paritas Figma)', () => {
   });
 });
 
+describe('resizeOps (paritas Figma Alt+panah)', () => {
+  it('lebar/tinggi angka ±Δ min 1; non-angka/board/komposit dilewati', () => {
+    const n = (id: string, o: Partial<{ width: number; height: number }>) => ({ id, name: id, type: 'rect', ...o });
+    expect(resizeOps([n('A', { width: 100, height: 50 })], 10, 0)).toEqual({ ops: [{ op: 'update', id: 'A', patch: { width: 110 } }], label: 'Resize A' });
+    expect(resizeOps([n('A', { width: 5, height: 50 })], -10, 0)).toMatchObject({ ops: [{ op: 'update', id: 'A', patch: { width: 1 } }] });
+    expect(resizeOps([n('A', { width: 100, height: 50 })], 0, -1)).toMatchObject({ ops: [{ op: 'update', id: 'A', patch: { height: 49 } }] });
+    // hug/fill (bukan angka) dan board → tanpa plan.
+    expect(resizeOps([n('A', {}), { id: 'B', name: 'B', type: 'board', width: 400 }], 1, 0)).toBeUndefined();
+  });
+});
+
 describe('rotateOps / textStyleOps (paritas Figma)', () => {
   it('rotateOps: rotation += deg; board/alamat komposit dilewati, tanpa anggota → undefined', () => {
     expect(rotateOps([{ id: 'A', name: 'A', type: 'rect', rotation: 15 }], 15)).toEqual({ ops: [{ op: 'update', id: 'A', patch: { rotation: 30 } }], label: 'Rotate A' });
@@ -536,6 +560,8 @@ describe('rotateOps / textStyleOps (paritas Figma)', () => {
     expect(textStyleOps([t({})], 'bold')).toMatchObject({ ops: [{ op: 'update', id: 't', patch: { weight: 700 } }] });
     expect(textStyleOps([t({ style: 'italic' })], 'italic')).toMatchObject({ ops: [{ op: 'update', id: 't', patch: { style: 'normal' } }] });
     expect(textStyleOps([t({})], 'underline')).toMatchObject({ ops: [{ op: 'update', id: 't', patch: { decoration: 'underline' } }] });
+    expect(textStyleOps([t({})], 'align-left')).toMatchObject({ ops: [{ op: 'update', id: 't', patch: { align: 'left' } }] });
+    expect(textStyleOps([t({})], 'align-right')).toMatchObject({ ops: [{ op: 'update', id: 't', patch: { align: 'right' } }] });
     expect(textStyleOps([t({ size: 16 })], 'size+')).toMatchObject({ ops: [{ op: 'update', id: 't', patch: { size: 18 } }] });
     expect(textStyleOps([t({ size: 16 })], 'size-')).toMatchObject({ ops: [{ op: 'update', id: 't', patch: { size: 14 } }] });
     expect(textStyleOps([t({ weight: 400 })], 'weight+')).toMatchObject({ ops: [{ op: 'update', id: 't', patch: { weight: 500 } }] });
