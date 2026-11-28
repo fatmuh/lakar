@@ -12,11 +12,50 @@ export type AlignAction = 'align-left' | 'align-center' | 'align-right' | 'align
 export type DistributeAction = 'distribute-h' | 'distribute-v';
 /** Aksi komponen (epic komponen story 4): jadikan seleksi master, dan detach instance. */
 export type ComponentAction = 'create-component' | 'detach';
-export type EditAction = 'group' | 'ungroup' | 'duplicate' | 'copy-png' | 'delete' | 'forward' | 'backward' | AlignAction | DistributeAction | ComponentAction;
+/**
+ * Paritas Figma (spec-canvas-shortcuts): `front`/`back` = ujung z (selain `forward`/`backward` satu langkah),
+ * `wrap-frame` = bungkus dalam frame (mekanika group, nama "Frame"), `auto-layout`/`unlayout` = `layout` row ↔ none,
+ * `fit-content` = frame dirapatkan ke union anaknya.
+ */
+export type EditAction =
+  | 'group'
+  | 'ungroup'
+  | 'duplicate'
+  | 'copy-png'
+  | 'delete'
+  | 'forward'
+  | 'backward'
+  | 'front'
+  | 'back'
+  | 'wrap-frame'
+  | 'auto-layout'
+  | 'unlayout'
+  | 'fit-content'
+  | AlignAction
+  | DistributeAction
+  | ComponentAction;
 
 export const ALIGN_ACTIONS: readonly AlignAction[] = ['align-left', 'align-center', 'align-right', 'align-top', 'align-middle', 'align-bottom'];
 export const DISTRIBUTE_ACTIONS: readonly DistributeAction[] = ['distribute-h', 'distribute-v'];
-export const EDIT_ACTIONS: readonly EditAction[] = ['group', 'ungroup', 'duplicate', 'copy-png', 'delete', 'forward', 'backward', ...ALIGN_ACTIONS, ...DISTRIBUTE_ACTIONS, 'create-component', 'detach'];
+export const EDIT_ACTIONS: readonly EditAction[] = [
+  'group',
+  'ungroup',
+  'duplicate',
+  'copy-png',
+  'delete',
+  'forward',
+  'backward',
+  'front',
+  'back',
+  'wrap-frame',
+  'auto-layout',
+  'unlayout',
+  'fit-content',
+  ...ALIGN_ACTIONS,
+  ...DISTRIBUTE_ACTIONS,
+  'create-component',
+  'detach',
+];
 
 /**
  * Plan satu aksi. `select`: seleksi sesudah sukses — `ids` langsung, atau `refs` (nama `ref` op add/duplicate yang
@@ -58,10 +97,10 @@ const originOf = (n: GeoNode) => ({ x: n.box.x - n.x, y: n.box.y - n.y });
 
 const SAME_PARENT = 'Select layers in the same parent to group';
 
-function planGroup(scene: readonly GeoNode[], index: ReadonlyMap<string, GeoNode>, ids: readonly string[]): PlanResult {
+function planGroup(scene: readonly GeoNode[], index: ReadonlyMap<string, GeoNode>, ids: readonly string[], name = 'Group', layout: 'none' | 'row' = 'none'): PlanResult {
   const members = topMost(index, ids);
   if (!members.length) return undefined;
-  if (members.some((m) => m.type === 'board')) return { error: "Boards can't be grouped" };
+  if (members.some((m) => m.type === 'board')) return { error: `Boards can't be ${layout === 'row' ? 'auto-laid out' : 'grouped'}` };
   const parentId = members[0]!.parentId;
   if (!parentId || members.some((m) => m.parentId !== parentId)) return { error: SAME_PARENT };
   const siblings = siblingsOf(scene, index, members[0]!);
@@ -72,7 +111,7 @@ function planGroup(scene: readonly GeoNode[], index: ReadonlyMap<string, GeoNode
   const anchor = flow ? at(ordered[0]!) : at(ordered[ordered.length - 1]!);
   const memberIds = new Set(ordered.map((m) => m.id));
   const finalIndex = siblings.filter((s, i) => i < anchor && !memberIds.has(s.id)).length;
-  const frame: Record<string, unknown> = { type: 'frame', name: 'Group', layout: 'none', width: Math.max(1, rnd(u.w)), height: Math.max(1, rnd(u.h)) };
+  const frame: Record<string, unknown> = { type: 'frame', name, layout, width: Math.max(1, rnd(u.w)), height: Math.max(1, rnd(u.h)) };
   // Asal frame: anggota absolut pertama memberi asal koordinat parent, jadi x/y anak = x/y lama − x/y frame (persis).
   let fx = rnd(u.x);
   let fy = rnd(u.y);
@@ -85,12 +124,76 @@ function planGroup(scene: readonly GeoNode[], index: ReadonlyMap<string, GeoNode
   const ops: DocOp[] = [{ op: 'add', parentId, node: frame, ref: 'group' }];
   for (const m of ordered) {
     ops.push({ op: 'move', id: m.id, parentId: '@group' });
-    const x = flow ? rnd(m.box.x - u.x) : rnd(m.box.x - originOf(ordered[0]!).x) - fx;
-    const y = flow ? rnd(m.box.y - u.y) : rnd(m.box.y - originOf(ordered[0]!).y) - fy;
-    ops.push({ op: 'update', id: m.id, patch: { position: 'absolute', x, y } });
+    // Auto layout: anak jadi flow (`null` menghapus posisi absolut); grup: tetap absolut relatif frame baru.
+    const patch =
+      layout === 'row'
+        ? { position: null, x: null, y: null }
+        : { position: 'absolute', x: flow ? rnd(m.box.x - u.x) : rnd(m.box.x - originOf(ordered[0]!).x) - fx, y: flow ? rnd(m.box.y - u.y) : rnd(m.box.y - originOf(ordered[0]!).y) - fy };
+    ops.push({ op: 'update', id: m.id, patch });
   }
   ops.push({ op: 'move', id: '@group', parentId, index: finalIndex });
-  return { ops, label: named('Group', ordered), select: { refs: ['group'] } };
+  return { ops, label: named(name === 'Group' ? 'Group' : name === 'Frame' ? 'Frame selection' : 'Add auto layout to', ordered), select: { refs: ['group'] } };
+}
+
+/**
+ * Auto layout (Shift+A, Figma): satu frame → `layout:'row'`; multi/satu non-frame → dibungkus frame `layout:'row'`
+ * bernama "Auto layout" (mekanika `planGroup`, anak jadi flow). `unlayout` (Alt+Shift+A): `layout` → 'none'.
+ */
+function planAutoLayout(scene: readonly GeoNode[], index: ReadonlyMap<string, GeoNode>, ids: readonly string[]): PlanResult {
+  const members = topMost(index, ids);
+  if (!members.length) return undefined;
+  if (members.length === 1 && members[0]!.type === 'frame') {
+    // Frame yang sudah auto layout: Shift+A no-op (paritas Figma).
+    if (members[0]!.layout === 'row' || members[0]!.layout === 'column' || members[0]!.layout === 'grid') return undefined;
+    return { ops: [{ op: 'update', id: members[0]!.id, patch: { layout: 'row' } }], label: label(`Add auto layout to ${members[0]!.name}`) };
+  }
+  return planGroup(scene, index, ids, 'Auto layout', 'row');
+}
+
+function planUnlayout(_scene: readonly GeoNode[], index: ReadonlyMap<string, GeoNode>, ids: readonly string[]): PlanResult {
+  const frames = topMost(index, ids).filter((n) => n.type === 'frame' && (n.layout === 'row' || n.layout === 'column' || n.layout === 'grid'));
+  if (!frames.length) return undefined;
+  return { ops: frames.map((f) => ({ op: 'update', id: f.id, patch: { layout: 'none' } })), label: named('Remove auto layout from', frames) };
+}
+
+/** Ujung z (Figma `]`/`[`): anggota terpilih pindah ke indeks akhir (front) / 0 (back) tiap parent; sudah di ujung → lewati. */
+function planZEdge(scene: readonly GeoNode[], index: ReadonlyMap<string, GeoNode>, ids: readonly string[], dir: 'front' | 'back'): PlanResult {
+  const members = topMost(index, ids);
+  if (!members.length) return undefined;
+  const sel = new Set(members.map((m) => m.id));
+  const ops: DocOp[] = [];
+  for (const p of [...new Set(members.map((m) => m.parentId ?? ''))]) {
+    const order = (p ? (index.get(p)?.children ?? []) : scene).map((n) => n.id);
+    const parentId = p || null;
+    const picked = order.filter((id) => sel.has(id));
+    const rest = order.filter((id) => !sel.has(id));
+    // Indeks akhir tiap anggota (urutan relatif dipertahankan); anggota yang indeksnya sudah sama dilewati.
+    picked.forEach((id, k) => {
+      const final = dir === 'front' ? rest.length + k : k;
+      if (order.indexOf(id) !== final) ops.push({ op: 'move', id, parentId, index: final });
+    });
+  }
+  return ops.length ? { ops, label: named(dir === 'front' ? 'Bring to front' : 'Send to back', members) } : undefined;
+}
+
+/** Fit content (Figma Ctrl+Alt+Shift+R): frame/board absolut dirapatkan ke union anak-anaknya; anak ikut bergeser. */
+function planFitContent(_scene: readonly GeoNode[], index: ReadonlyMap<string, GeoNode>, ids: readonly string[]): PlanResult {
+  const frames = topMost(index, ids).filter((n) => (n.type === 'frame' || n.type === 'board') && n.absolute && n.children.length > 0);
+  if (!frames.length) return undefined;
+  const ops: DocOp[] = [];
+  for (const f of frames) {
+    const u = unionBox(f.children.map((c) => c.box));
+    if (!u) continue;
+    const dx = rnd(u.x - f.box.x);
+    const dy = rnd(u.y - f.box.y);
+    if (dx === 0 && dy === 0 && rnd(u.w) === rnd(f.box.w) && rnd(u.h) === rnd(f.box.h)) continue;
+    for (const c of f.children) {
+      if (!c.absolute) continue;
+      if (dx !== 0 || dy !== 0) ops.push({ op: 'update', id: c.id, patch: { x: rnd(c.x - dx), y: rnd(c.y - dy) } });
+    }
+    ops.push({ op: 'update', id: f.id, patch: { x: rnd(f.x + dx), y: rnd(f.y + dy), width: Math.max(1, rnd(u.w)), height: Math.max(1, rnd(u.h)) } });
+  }
+  return ops.length ? { ops, label: named('Resize to fit', frames) } : undefined;
 }
 
 function planUngroup(scene: readonly GeoNode[], index: ReadonlyMap<string, GeoNode>, ids: readonly string[]): PlanResult {
@@ -236,7 +339,7 @@ function planDistribute(index: ReadonlyMap<string, GeoNode>, ids: readonly strin
 /** Alamat komposit (isi instance, AD-12): hanya bisa di-update/reset, bukan dipindah/dihapus/diduplikat. */
 const composite = (n: GeoNode) => n.id.includes('/');
 /** Aksi yang memindah/menghapus/menyalin node tersimpan: nonaktif bila seleksi memuat alamat komposit. */
-const STRUCTURAL: ReadonlySet<EditAction> = new Set<EditAction>(['group', 'ungroup', 'duplicate', 'delete', 'forward', 'backward']);
+const STRUCTURAL: ReadonlySet<EditAction> = new Set<EditAction>(['group', 'ungroup', 'duplicate', 'delete', 'forward', 'backward', 'front', 'back', 'wrap-frame', 'auto-layout', 'unlayout', 'fit-content']);
 /** Nama master hasil Create component dari beberapa layer (frame pembungkus). */
 export const COMPONENT_FRAME_NAME = 'Component';
 const EMPTY_COMPONENT = { props: [], slots: [] };
@@ -309,6 +412,17 @@ export function planAction(kind: EditAction, scene: readonly GeoNode[], ids: rea
     case 'forward':
     case 'backward':
       return planZOrder(scene, index, ids, kind);
+    case 'front':
+    case 'back':
+      return planZEdge(scene, index, ids, kind);
+    case 'wrap-frame':
+      return planGroup(scene, index, ids, 'Frame');
+    case 'auto-layout':
+      return planAutoLayout(scene, index, ids);
+    case 'unlayout':
+      return planUnlayout(scene, index, ids);
+    case 'fit-content':
+      return planFitContent(scene, index, ids);
     case 'distribute-h':
     case 'distribute-v':
       return planDistribute(index, ids, kind);
@@ -340,6 +454,12 @@ export function actionState(scene: readonly GeoNode[], ids: readonly string[]): 
   out.delete = structural;
   out.forward = structural && planZOrder(scene, index, ids, 'forward') !== undefined;
   out.backward = structural && planZOrder(scene, index, ids, 'backward') !== undefined;
+  out.front = structural && members.some((m) => planZEdge(scene, index, [m.id], 'front') !== undefined);
+  out.back = structural && members.some((m) => planZEdge(scene, index, [m.id], 'back') !== undefined);
+  out['wrap-frame'] = out.group;
+  out['auto-layout'] = structural && (members.some((m) => m.type !== 'frame' || m.layout === 'none' || m.layout === undefined) || members.length > 1);
+  out.unlayout = structural && members.some((m) => m.layout === 'row' || m.layout === 'column' || m.layout === 'grid');
+  out['fit-content'] = structural && members.some((m) => (m.type === 'frame' || m.type === 'board') && m.absolute && m.children.length > 0);
   const create = planCreateComponent(scene, index, ids);
   out['create-component'] = create !== undefined && !('error' in create);
   out.detach = planDetach(index, ids) !== undefined;
@@ -376,43 +496,199 @@ export function selectionAfter(plan: EditPlan, refs: Readonly<Record<string, str
   return undefined;
 }
 
-/** Bentuk event keyboard yang dibaca `shortcutAction`. */
+/** Bentuk event keyboard yang dibaca `shortcutAction`/`viewShortcut`. */
 export type ShortcutKey = { key: string; code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean };
 const ALIGN_CODES: Record<string, EditAction> = { KeyA: 'align-left', KeyH: 'align-center', KeyD: 'align-right', KeyW: 'align-top', KeyV: 'align-middle', KeyS: 'align-bottom' };
 const DISTRIBUTE_CODES: Record<string, EditAction> = { KeyH: 'distribute-h', KeyV: 'distribute-v' };
 const ARROWS: Record<string, readonly [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
+/** Gaya teks paritas Figma (spec-canvas-shortcuts): dipetakan ke patch properti node teks oleh `textStyleOps`. */
+export type TextStyleKey = 'bold' | 'italic' | 'underline' | 'size+' | 'size-' | 'weight+' | 'weight-' | 'spacing+' | 'spacing-' | 'leading+' | 'leading-';
+
+/** Intent edit yang bukan `EditAction` langsung: seleksi navigasi, rename, rotate, dan gaya teks. */
+export type ShortcutIntent =
+  | { action: EditAction }
+  | { selectAll: true }
+  | { selectInverse: true }
+  | { enter: true }
+  | { parent: true }
+  | { sibling: 1 | -1 }
+  | { rename: true }
+  | { gotoMain: true }
+  | { multiVariant: true }
+  | { rotate: number }
+  | { textStyle: TextStyleKey }
+  | { nudge: readonly [number, number] };
+
 /**
- * Shortcut aksi: Delete/Backspace, Ctrl/⌘+G (Shift = ungroup), Ctrl/⌘+D, Ctrl/⌘+Shift+C (Copy as PNG),
- * Ctrl/⌘+] / [, Alt+A/H/D/W/V/S align, Alt+Shift+H/V distribute (lewat `code`, aman untuk Alt di macOS),
- * Ctrl/⌘+A pilih semua, panah (Shift = 10px) nudge.
+ * Shortcut aksi (level edit): Delete/Backspace, Ctrl/⌘+G (Shift = ungroup, Ctrl+Backspace juga), Ctrl/⌘+D,
+ * Ctrl/⌘+Shift+C (Copy as PNG), Ctrl/⌘+] / [ satu langkah dan `]`/`[` atau Ctrl/⌘+Shift+]/[ ke ujung,
+ * Ctrl/⌘+Alt+G frame selection, Alt+A/H/D/W/V/S align, Alt+Shift+H/V distribute, Alt+Shift+A lepas auto layout,
+ * Ctrl/⌘+A pilih semua, Ctrl/⌘+Shift+A inverse, Shift+A auto layout, Ctrl/⌘+Alt+Shift+R fit content,
+ * Enter masuk / Shift+Enter atau `\` ke parent, Tab/Shift+Tab sibling, Ctrl/⌘+R rename,
+ * Ctrl/⌘+Alt+Shift+K ke master, Q multi-edit varian, Ctrl/⌘+Alt+panah putar 1° (+Shift 15°),
+ * Ctrl/⌘+B/I/U dan <>/, untuk gaya teks, panah (Shift = 10px) nudge. `code` dipakai untuk Alt/&lt;&gt; (aman macOS).
  */
-export function shortcutAction(e: ShortcutKey): { action: EditAction } | { selectAll: true } | { nudge: readonly [number, number] } | undefined {
+export function shortcutAction(e: ShortcutKey): ShortcutIntent | undefined {
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
-  // Komponen (desain ZHqtv): Ctrl/⌘+Alt+K = Create component, Ctrl/⌘+Alt+B = Detach instance (lewat `code`).
-  if (mod && e.altKey && !e.shiftKey) return e.code === 'KeyK' ? { action: 'create-component' } : e.code === 'KeyB' ? { action: 'detach' } : undefined;
+  // Ctrl/⌘+Alt(+Shift): komponen (K/B, Shift+K = ke master), frame selection (G), fit content (Shift+R), putar (panah).
+  if (mod && e.altKey) {
+    if (e.code === 'ArrowUp' || e.code === 'ArrowDown') return { rotate: (e.code === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 15 : 1) };
+    if (e.shiftKey) return e.code === 'KeyK' ? { gotoMain: true } : e.code === 'KeyR' ? { action: 'fit-content' } : undefined;
+    if (e.code === 'Comma' || e.code === 'Period') return { textStyle: `weight${e.code === 'Comma' ? '-' : '+'}` };
+    if (e.key === 'Enter') return undefined;
+    return e.code === 'KeyK' ? { action: 'create-component' } : e.code === 'KeyB' ? { action: 'detach' } : e.code === 'KeyG' ? { action: 'wrap-frame' } : undefined;
+  }
   if (!mod && !e.altKey && !e.shiftKey && (e.key === 'Delete' || e.key === 'Backspace')) return { action: 'delete' };
   if (mod && !e.altKey) {
     if (k === 'g') return { action: e.shiftKey ? 'ungroup' : 'group' };
     if (k === 'c' && e.shiftKey) return { action: 'copy-png' };
-    if (e.shiftKey) return undefined;
+    if (k === 'a' && e.shiftKey) return { selectInverse: true };
+    if (e.code === 'BracketRight' || e.code === 'BracketLeft') return { action: e.code === 'BracketRight' ? (e.shiftKey ? 'front' : 'forward') : e.shiftKey ? 'back' : 'backward' };
+    if (e.key === 'Backspace') return { action: 'ungroup' };
+    if (e.shiftKey) {
+      if (e.code === 'Comma' || e.code === 'Period') return { textStyle: `size${e.code === 'Comma' ? '-' : '+'}` };
+      return undefined;
+    }
     if (k === 'd') return { action: 'duplicate' };
-    if (e.code === 'BracketRight') return { action: 'forward' };
-    if (e.code === 'BracketLeft') return { action: 'backward' };
     if (k === 'a') return { selectAll: true };
+    if (k === 'r') return { rename: true };
+    if (k === 'b') return { textStyle: 'bold' };
+    if (k === 'i') return { textStyle: 'italic' };
+    if (k === 'u') return { textStyle: 'underline' };
     return undefined;
   }
   if (e.altKey && !mod) {
+    if (e.code === 'Comma' || e.code === 'Period') return { textStyle: `${e.shiftKey ? 'leading' : 'spacing'}${e.code === 'Comma' ? '-' : '+'}` };
+    if (e.shiftKey && e.code === 'KeyA') return { action: 'unlayout' };
     const a = (e.shiftKey ? DISTRIBUTE_CODES : ALIGN_CODES)[e.code];
     return a ? { action: a } : undefined;
   }
+  if (e.shiftKey && !mod) {
+    if (e.key === 'Tab') return { sibling: -1 };
+    if (e.code === 'KeyA') return { action: 'auto-layout' };
+    if (e.key === 'Enter') return { parent: true };
+    const big = ARROWS[e.key];
+    if (big) return { nudge: [big[0] * 10, big[1] * 10] };
+    return undefined;
+  }
+  if (e.key === 'Tab') return { sibling: 1 };
+  if (e.key === 'Enter') return { enter: true };
+  if (e.key === '\\') return { parent: true };
+  if (e.key === ']') return { action: 'front' };
+  if (e.key === '[') return { action: 'back' };
+  if (e.code === 'KeyQ') return { multiVariant: true };
   const arrow = ARROWS[e.key];
-  if (arrow && !mod && !e.altKey) {
-    const step = e.shiftKey ? 10 : 1;
-    return { nudge: [arrow[0] * step, arrow[1] * step] };
+  if (arrow) return { nudge: [arrow[0], arrow[1]] };
+  return undefined;
+}
+
+/** Kunci tampilan (tetap berlaku saat dokumen read-only): tab panel, komentar/kursor, outline, shortcuts, present, siklus fokus. */
+export type ViewKey = 'tab' | 'toggle-proto' | 'present' | 'comments' | 'cursors' | 'outline' | 'shortcuts' | 'focus-cycle';
+
+/**
+ * Shortcut level tampilan (spec-canvas-shortcuts): Shift+E tab Design↔Prototype, Alt+Digit1..4 tab panel ke-N,
+ * Shift+C sembunyikan pin komentar, Ctrl/⌘+Alt+\ kursor agen, Ctrl/⌘+Shift+? panel shortcut,
+ * Shift+Space atau Ctrl/⌘+Alt+Enter present, F6 siklus fokus region. `tab` membawa indeks 0..3.
+ */
+export function viewShortcut(e: ShortcutKey): { view: ViewKey; tab?: number } | undefined {
+  const mod = e.ctrlKey || e.metaKey;
+  if (e.key === 'F6' && !mod && !e.altKey) return { view: 'focus-cycle' };
+  if (mod && e.altKey && e.key === 'Enter' && !e.shiftKey) return { view: 'present' };
+  if (mod && e.altKey && (e.key === '\\' || e.code === 'Backslash')) return { view: 'cursors' };
+  if (mod && e.shiftKey && !e.altKey && e.code === 'KeyO') return { view: 'outline' };
+  if (mod && e.shiftKey && !e.altKey && (e.key === '?' || e.code === 'Slash')) return { view: 'shortcuts' };
+  if (e.shiftKey && !mod && !e.altKey) {
+    if (e.code === 'KeyE') return { view: 'toggle-proto' };
+    if (e.code === 'KeyC') return { view: 'comments' };
+    if (e.code === 'Space') return { view: 'present' };
+    return undefined;
+  }
+  if (e.altKey && !mod && !e.shiftKey && e.code.startsWith('Digit')) {
+    const n = Number(e.code.slice(5));
+    if (n >= 1 && n <= 4) return { view: 'tab', tab: n - 1 };
   }
   return undefined;
+}
+
+// --- Seleksi navigasi (paritas Figma) ---
+
+/** Ctrl+Shift+A: invers seleksi dalam lingkup `selectAllIds` (saudara board primer / board saat seleksi kosong). */
+export function selectInverseIds(scene: readonly GeoNode[], ids: readonly string[]): string[] {
+  const sel = new Set(ids);
+  return selectAllIds(scene, ids).filter((id) => !sel.has(id));
+}
+
+/** Enter (Figma): satu kontainer terpilih (frame/board/instance dengan anak) → anak pertama; selain itu undefined. */
+export function enterChildId(scene: readonly GeoNode[], ids: readonly string[]): string | undefined {
+  if (ids.length !== 1) return undefined;
+  const n = indexGeo(scene).get(ids[0]!);
+  return n && (n.type === 'frame' || n.type === 'board' || n.component === 'instance') && n.children.length ? n.children[0]!.id : undefined;
+}
+
+/** Shift+Enter atau `\`: parent dari node primer (terpilih terakhir); board → undefined (sudah puncak). */
+export function parentIdOf(scene: readonly GeoNode[], ids: readonly string[]): string | undefined {
+  const index = indexGeo(scene);
+  const primary = [...ids].reverse().map((id) => index.get(id)).find((n) => n !== undefined);
+  return primary?.parentId;
+}
+
+/** Tab/Shift+Tab: saudara berikutnya/sebelumnya dari node primer; di ujung → undefined (tidak wrap). */
+export function siblingIdOf(scene: readonly GeoNode[], ids: readonly string[], dir: 1 | -1): string | undefined {
+  const index = indexGeo(scene);
+  const primary = [...ids].reverse().map((id) => index.get(id)).find((n) => n !== undefined);
+  if (!primary) return undefined;
+  const siblings = siblingsOf(scene, index, primary);
+  const at = siblings.findIndex((s) => s.id === primary.id);
+  return siblings[at + dir]?.id;
+}
+
+// --- Op dari nilai tersimpan (rotate, gaya teks) ---
+
+/** Node untuk `rotateOps`/`textStyleOps`: id + properti tersimpan yang relevan (dari `findNode`, bukan geometri). */
+export type StyledNode = { id: string; name: string; type: string; rotation?: number; weight?: number; style?: string; decoration?: string; size?: number; lineHeight?: number; letterSpacing?: number };
+
+/** Ctrl/⌘+Alt+panah: `rotation += deg` pada tiap node terpilih yang bisa diputar (bukan board/alamat komposit). */
+export function rotateOps(nodes: readonly StyledNode[], deg: number): EditPlan | undefined {
+  const rotatable = nodes.filter((n) => n.type !== 'board' && !n.id.includes('/'));
+  if (!rotatable.length) return undefined;
+  return {
+    ops: rotatable.map((n) => ({ op: 'update', id: n.id, patch: { rotation: (n.rotation ?? 0) + deg } })),
+    label: label(rotatable.length === 1 ? `Rotate ${rotatable[0]!.name}` : `Rotate ${rotatable.length} layers`),
+  };
+}
+
+const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 120, 144] as const;
+const nextSize = (v: number, dir: 1 | -1): number => {
+  if (dir > 0) return FONT_SIZES.find((s) => s > v) ?? v + 24;
+  return [...FONT_SIZES].reverse().find((s) => s < v) ?? Math.max(1, v - 1);
+};
+
+/**
+ * Gaya teks Figma (Ctrl/⌘+B/I/U, Ctrl/⌘+Shift+<> size, Ctrl/⌘+Alt+<> weight, Alt+<> spacing, Alt+Shift+<> leading):
+ * patch properti node teks; nilai token (bukan angka) dilewati. Toggle: bold 400↔700, italic, underline.
+ */
+export function textStyleOps(nodes: readonly StyledNode[], key: TextStyleKey): EditPlan | undefined {
+  const texts = nodes.filter((n) => n.type === 'text' && !n.id.includes('/'));
+  const ops: DocOp[] = [];
+  for (const t of texts) {
+    const patch: Record<string, unknown> = {};
+    if (key === 'bold') patch.weight = (t.weight ?? 400) >= 700 ? 400 : 700;
+    else if (key === 'italic') patch.style = t.style === 'italic' ? 'normal' : 'italic';
+    else if (key === 'underline') patch.decoration = t.decoration === 'underline' ? 'none' : 'underline';
+    else if (key.startsWith('size')) patch.size = typeof t.size === 'number' ? nextSize(t.size, key === 'size+' ? 1 : -1) : undefined;
+    else if (key.startsWith('weight')) {
+      const w = (t.weight ?? 400) + (key === 'weight+' ? 100 : -100);
+      patch.weight = Math.min(900, Math.max(100, w));
+    } else if (key.startsWith('spacing')) patch.letterSpacing = typeof t.letterSpacing === 'number' || t.letterSpacing === undefined ? Math.round(((t.letterSpacing ?? 0) + (key === 'spacing+' ? 0.5 : -0.5)) * 100) / 100 : undefined;
+    else if (key.startsWith('leading')) patch.lineHeight = typeof t.lineHeight === 'number' ? Math.max(1, t.lineHeight + (key === 'leading+' ? 4 : -4)) : undefined;
+    if (Object.values(patch).every((v) => v === undefined)) continue;
+    ops.push({ op: 'update', id: t.id, patch });
+  }
+  if (!ops.length) return undefined;
+  const title = { bold: 'Bold', italic: 'Italic', underline: 'Underline' }[key as 'bold' | 'italic' | 'underline'] ?? 'Change text style';
+  return { ops, label: label(texts.length === 1 ? `${title} ${texts[0]!.name}` : `${title} ${texts.length} text layers`) };
 }
 
 /** Ctrl+A: kosong → semua board; board primer → anaknya (atau board itu bila kosong); node → semua saudaranya. */

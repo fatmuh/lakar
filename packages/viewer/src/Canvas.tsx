@@ -74,7 +74,7 @@ const isInsertTool = (t: Tool): t is InsertKind => t !== 'select' && t !== 'hand
 /** Tool sisip, Pen, atau komentar (kursor crosshair; kembali ke Select saat pratinjau/offline atau Escape). */
 const isDrawTool = (t: Tool) => isInsertTool(t) || t === 'pen' || t === 'comment';
 const TOOL_ICON: Record<InsertKind, IconName> = { frame: 'frame', rect: 'square', ellipse: 'circle', text: 'text', image: 'image', icon: 'shapes' };
-const TOOL_KEYS: Record<string, InsertKind> = { f: 'frame', r: 'rect', o: 'ellipse', t: 'text', i: 'icon' };
+const TOOL_KEYS: Record<string, InsertKind> = { f: 'frame', a: 'frame', r: 'rect', o: 'ellipse', t: 'text', i: 'icon' };
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 /** Label shortcut untuk tooltip/menu (Image: Shift+Ctrl/⌘+K). */
 export const shortcutLabel = (kind: InsertKind) => (kind === 'image' ? (isMac ? '⇧⌘K' : 'Ctrl Shift K') : (INSERT_KINDS.find((k) => k.kind === kind)?.key ?? ''));
@@ -111,6 +111,20 @@ function focusCamera(b: CanvasBoard, c: Camera, w: number, h: number): Camera {
 }
 
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** Mode outline: stylesheet sekali-pasang di shadow root host board; `on=false` menghapusnya. */
+const OUTLINE_CSS =
+  '[data-lakar-id]{outline:1px solid #0d99ff!important;outline-offset:-1px}[data-lakar-id][data-type="text"]{color:transparent!important;text-stroke:.5px #0d99ff}';
+function applyOutline(host: HTMLDivElement, on: boolean) {
+  const root = host.shadowRoot;
+  if (!root) return;
+  let el = root.querySelector('style[data-lakar-outline]');
+  if (on && !el) {
+    el = document.createElement('style');
+    el.setAttribute('data-lakar-outline', '');
+    el.textContent = OUTLINE_CSS;
+    root.appendChild(el);
+  } else if (!on && el) el.remove();
+}
 /** Durasi geser kamera Follow agent (desain bagian 04: 500ms). */
 const FOLLOW_MS = 500;
 /** Durasi luncur Agent Cursor (desain bagian 04, diperbarui spec-canvas-agent-effects: 180ms easeOutCubic). */
@@ -620,6 +634,7 @@ export function Canvas({
   onPathEdit,
   comments,
   onCommentAt,
+  outline,
 }: {
   /** Commit yang membuat node (Pen tool, epic paste-vektor story 5): id node baru, undefined bila gagal. */
   onCommitCreate?: ((ops: DocOp[], description: string) => Promise<string | undefined>) | undefined;
@@ -702,6 +717,8 @@ export function Canvas({
   comments?: CanvasComments | undefined;
   /** Klik dengan tool komentar: titik halaman + layer di bawah kursor (`nodeId`, untuk pin di layer). */
   onCommentAt?: ((at: { x: number; y: number; nodeId?: string }) => void) | undefined;
+  /** Mode outline (Figma Ctrl/⌘+Shift+O): garis tepi tiap layer di dalam shadow root board. */
+  outline?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // Sekali per objek dokumen (bukan per frame kamera); error resolve tampil di setiap board.
@@ -799,10 +816,18 @@ export function Canvas({
     (boardId: string, host: HTMLDivElement, rev: number) => {
       editMountedRef.current?.(boardId, host, rev);
       mountedHosts.current.set(boardId, { host, rev });
+      if (outlineRef.current) applyOutline(host, true);
       if (!preview) playFade(boardId, host, rev);
     },
     [playFade, preview],
   );
+  // Mode outline (Ctrl/⌘+Shift+O): stylesheet kecil disisipkan ke shadow root tiap board — hanya garis tepi
+  // [data-lakar-id] (warna isi diredupkan supaya bentuk terbaca). Aktif juga untuk board yang baru di-mount.
+  const outlineRef = useRef(outline === true);
+  outlineRef.current = outline === true;
+  useEffect(() => {
+    for (const { host } of mountedHosts.current.values()) applyOutline(host, outline === true);
+  }, [outline]);
   // Stream tersambung ulang (`hello` membangun ulang Activity): rencana di snapshot dianggap lama, tidak diputar.
   const lastEpoch = useRef(fadeEpoch);
   useEffect(() => {
@@ -1044,7 +1069,7 @@ export function Canvas({
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const insertKey = TOOL_KEYS[e.key.toLowerCase()];
-      if (e.code === 'Space') {
+      if (e.code === 'Space' && !e.shiftKey) {
         setSpaceHeld(true);
         if (e.target === document.body) e.preventDefault();
       } else if (e.key === 'v' || e.key === 'V') setTool('select');
@@ -1288,6 +1313,7 @@ export function Canvas({
   return (
     <section
       ref={ref}
+      tabIndex={-1}
       className={`canvas${handMode ? ' hand' : isDrawTool(tool) ? ' inserting' : ''}${panning ? ' panning' : ''}${preview ? ' previewing' : ''}${stale !== undefined ? ' stale' : ''}${liveActive ? ' live-edit' : ''}${edit.dragging ? ' dragging' : ''}`}
       aria-label="Canvas"
       onPointerDown={onPointerDown}

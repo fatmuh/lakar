@@ -682,6 +682,11 @@ export function useCanvasEdit({
     el.addEventListener(
       'keydown',
       (e) => {
+        // Kombo gaya teks Figma (Ctrl/⌘+B/I/U dan <> dengan Ctrl/⌘/Alt/Shift): diteruskan ke shortcut
+        // kanvas — `textStyleOps` mem-patch properti node; kunci lain tetap milik kolom teks.
+        const cs = e.ctrlKey || e.metaKey;
+        const styleKey = (cs && !e.altKey && /^[biu]$/i.test(e.key)) || ((cs || e.altKey) && (e.code === 'Comma' || e.code === 'Period'));
+        if (styleKey) return;
         e.stopPropagation();
         if (e.isComposing) return;
         if (e.key === 'Escape') {
