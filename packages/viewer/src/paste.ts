@@ -176,7 +176,7 @@ const TOAST_NAMES_MAX = 4;
 
 /** Deskripsi toast: "Kept fill-rule, stroke caps and dashes. Not imported: filter, <mask> (no matching property)." */
 export function pasteDescription(r: PasteReport): string {
-  if (r.kind === 'html' || r.kind === 'figma' || r.kind === 'pen') return htmlKept(r);
+  if (r.kind !== 'svg') return htmlKept(r);
   const parts: string[] = [];
   const kept = r.kept.map((k) => KEPT_LABELS[k] ?? k);
   if (kept.length) parts.push(`Kept ${joinList(kept)}.`);
