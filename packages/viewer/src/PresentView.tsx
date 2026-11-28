@@ -58,7 +58,7 @@ const DRAG_PX = 8;
  * `height:'hug'` diukur dari elemen hasil mount (`offsetHeight`) sebelum fit. Kelas `enter-*` baru dipasang
  * saat mount selesai supaya transisi memutar konten baru, bukan host kosong.
  */
-function PresentBoard({ doc, boardId, enter, onReady }: { doc: ResolvedDocument; boardId: string; enter?: Active['enter'] | undefined; onReady?: (() => void) | undefined }) {
+function PresentBoard({ doc, boardId, enter, zoom = 'fit', onReady }: { doc: ResolvedDocument; boardId: string; enter?: Active['enter'] | undefined; zoom?: 'fit' | 'fill' | 'full' | undefined; onReady?: (() => void) | undefined }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string>();
   const [ready, setReady] = useState(false);
@@ -68,11 +68,16 @@ function PresentBoard({ doc, boardId, enter, onReady }: { doc: ResolvedDocument;
   const [scale, setScale] = useState(1);
   useEffect(() => {
     if (!board) return;
-    const fit = () => setScale(Math.max(0.05, Math.min(innerWidth / board.width, innerHeight / (bh ?? 600))));
+    const fit = () => {
+      const w = innerWidth / board.width;
+      const h = innerHeight / (bh ?? 600);
+      // Mode zoom Present (tombol Z): fit=seluruh board terlihat, fill=penuhi layar, full=ukuran asli.
+      setScale(zoom === 'full' ? 1 : Math.max(0.05, zoom === 'fill' ? Math.max(w, h) : Math.min(w, h)));
+    };
     fit();
     addEventListener('resize', fit);
     return () => removeEventListener('resize', fit);
-  }, [board?.id, board?.width, bh]);
+  }, [board?.id, board?.width, bh, zoom]);
   useEffect(() => {
     const host = hostRef.current;
     if (!host || !board) return;
@@ -106,6 +111,9 @@ function PresentBoard({ doc, boardId, enter, onReady }: { doc: ResolvedDocument;
   );
 }
 
+/** Siklus mode zoom Present (tombol Z): fit → fill → full → fit. */
+const ZOOMS = ['fit', 'fill', 'full'] as const;
+
 export function PresentView({ slug, flowId, onExit }: { slug: string; flowId?: string | undefined; onExit: () => void }) {
   const [doc, setDoc] = useState<LakarDocument>();
   const [resolved, setResolved] = useState<ResolvedDocument>();
@@ -117,6 +125,8 @@ export function PresentView({ slug, flowId, onExit }: { slug: string; flowId?: s
   const stackRef = useRef<string[]>([]);
   const stageRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(0);
+  // Mode zoom Present (tombol Z): siklus fit → fill → full → fit.
+  const [zoom, setZoom] = useState<(typeof ZOOMS)[number]>('fit');
   const indexRef = useRef<{ resolved: Map<string, NodeEntry>; stored: Map<string, NodeEntry> } | undefined>(undefined);
 
   const pickStart = useCallback((d: LakarDocument, r: ResolvedDocument) => {
@@ -249,14 +259,51 @@ export function PresentView({ slug, flowId, onExit }: { slug: string; flowId?: s
     };
   }, [resolved, current, go]);
 
+  // Navigasi keyboard Present (desain prototype Figma): →/Spasi/N board berikutnya dalam urutan dokumen,
+  // ← kembali (riwayat navigasi dulu, lalu board sebelumnya), F fullscreen, Z siklus mode zoom.
+  const orderedIds = useCallback((): string[] => {
+    const r = resolved;
+    return r ? r.pages.flatMap((p) => p.children).map((b) => (b as { id: string }).id) : [];
+  }, [resolved]);
+  const stepBoard = useCallback(
+    (dir: 1 | -1) => {
+      if (!current || !indexRef.current) return;
+      if (dir === -1) {
+        const prev = stackRef.current.pop();
+        if (prev) {
+          setNav((n) => n + 1);
+          setCurrent({ boardId: prev });
+          return;
+        }
+      }
+      const ids = orderedIds();
+      const i = ids.indexOf(current.boardId);
+      const next = ids[i + dir];
+      if (i === -1 || next === undefined || !indexRef.current.resolved.has(next)) return;
+      stackRef.current.push(current.boardId);
+      setNav((n) => n + 1);
+      setCurrent({ boardId: next });
+    },
+    [current, orderedIds],
+  );
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onExit();
-      if (e.key === 'r' || e.key === 'R') restart();
+      else if (e.key === 'r' || e.key === 'R') restart();
+      else if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        stepBoard(1);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        stepBoard(-1);
+      } else if (e.key === 'f' || e.key === 'F') {
+        if (document.fullscreenElement) void document.exitFullscreen();
+        else void document.documentElement.requestFullscreen?.();
+      } else if (e.key === 'z' || e.key === 'Z') setZoom((z) => ZOOMS[(ZOOMS.indexOf(z) + 1) % ZOOMS.length] ?? 'fit');
     };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
-  }, [onExit, restart]);
+  }, [onExit, restart, stepBoard]);
 
   // Rect hotspot diukur dari elemen live di dalam shadow root host (bukan light DOM) tiap ganti board / toggle.
   useEffect(() => {
@@ -296,7 +343,7 @@ export function PresentView({ slug, flowId, onExit }: { slug: string; flowId?: s
     <div className="present" role="application" aria-label="Present">
       <div ref={stageRef} className="present-stage">
         {/* key = boardId + nomor navigasi: remount per navigasi supaya animasi enter-* terulang tiap kali. */}
-        {resolved && current && <PresentBoard key={`${current.boardId}:${nav}`} doc={resolved} boardId={current.boardId} enter={current.enter} onReady={() => setMounted((m) => m + 1)} />}
+        {resolved && current && <PresentBoard key={`${current.boardId}:${nav}`} doc={resolved} boardId={current.boardId} enter={current.enter} zoom={zoom} onReady={() => setMounted((m) => m + 1)} />}
         {!resolved && <Icon name="loaderCircle" size={26} className="spin" />}
         {hotspots && spots.map((s) => <span key={s.id} className="present-hotspot" style={{ left: s.x, top: s.y, width: s.w, height: s.h }} />)}
       </div>

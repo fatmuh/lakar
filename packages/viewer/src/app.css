@@ -1225,6 +1225,46 @@ code {
 .modal.small {
   width: 420px;
 }
+/* Panel shortcut keyboard (Ctrl/⌘+Shift+?): grid dua kolom kelompok, kbd bergaya tombol. */
+.modal.shortcuts {
+  width: 640px;
+}
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 28px;
+}
+.shortcuts-group h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.shortcuts-group dl {
+  margin: 0;
+}
+.shortcuts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.shortcuts-row dd {
+  margin: 0;
+}
+.shortcuts-row kbd {
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font: 11px/1.4 ui-monospace, monospace;
+  white-space: nowrap;
+}
 .modal form,
 .modal.confirm {
   display: flex;
@@ -1596,6 +1636,19 @@ button.panel-tab:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Rename inline di pohon Layers (Ctrl/⌘+R, paritas Figma): input menggantikan label di tempat. */
+.layer-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  height: 20px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  outline: none;
 }
 .muted-note {
   padding: 4px 8px;

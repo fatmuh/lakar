@@ -52,8 +52,30 @@ import { instanceModel, masterModel, slotFrameInfo } from './componentProps';
 import type { ComponentEdit } from './ComponentPropsPanel';
 import { createActionQueue } from './componentQueue';
 import { indexGeo, toggleSelection, type GeoNode } from './gesture';
-import { actionState, EDIT_ACTIONS, nudgeNodes, nudgeOps, planAction, selectAllIds, selectionAfter, shortcutAction, topMost, type EditAction, type EditPlan } from './editActions';
+import {
+  actionState,
+  EDIT_ACTIONS,
+  enterChildId,
+  nudgeNodes,
+  nudgeOps,
+  parentIdOf,
+  planAction,
+  resizeOps,
+  rotateOps,
+  selectAllIds,
+  selectInverseIds,
+  selectionAfter,
+  shortcutAction,
+  siblingIdOf,
+  textStyleOps,
+  topMost,
+  viewShortcut,
+  type EditAction,
+  type EditPlan,
+  type StyledNode,
+} from './editActions';
 import { EditMenu } from './EditMenu';
+import { presentHash } from './files';
 import { EMPTY_STACKS, recordCommit, settleStep, takeStep, type UndoStacks } from './undoHistory';
 import { attachSelectionReporter } from './selectionSync';
 import { lastAgentLabel, pruneSelection, shareBadgeText, undoSkippedFor } from './liveChanges';
@@ -84,6 +106,7 @@ import { FileMenu } from './FileMenu';
 import { useNow, useOffline, useRetry } from './hooks';
 import { Icon, NODE_ICON } from './icons';
 import { Modal } from './NewFileDialog';
+import { ShortcutsModal } from './ShortcutsModal';
 import { DesignPanel } from './DesignPanel';
 import { CodeExportDialog } from './CodeExportDialog';
 import { ShareDialog } from './ShareDialog';
@@ -377,6 +400,13 @@ export function Viewer({ slug }: { slug: string }) {
     writeShowResolved(v);
     setShowResolvedState(v);
   }, []);
+  /** Paritas Figma (spec-canvas-shortcuts): pin komentar + kursor agen bisa disembunyikan, outline mode, panel shortcut. */
+  const [commentsHidden, setCommentsHidden] = useState(false);
+  const [cursorsHidden, setCursorsHidden] = useState(false);
+  const [outline, setOutline] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  /** ID layer yang sedang di-rename inline di pohon Layers (Ctrl/⌘+R). */
+  const [renaming, setRenaming] = useState<string | undefined>(undefined);
   /** Pencarian komponen di tab Assets (desain C2xbUQ "Search components"). */
   const [assetQuery, setAssetQuery] = useState('');
   /** Menu file dari chevron di header file. */
@@ -1157,6 +1187,25 @@ export function Viewer({ slug }: { slug: string }) {
   const renamePage = useCallback((id: string, name: string) => void pageWrite(api.renamePage(slug, id, name)), [slug, pageWrite]);
   const movePage = useCallback((id: string, to: number) => void pageWrite(api.movePage(slug, id, to)), [slug, pageWrite]);
   const deletePage = useCallback((id: string) => pageWrite(api.deletePage(slug, id)), [slug, pageWrite]);
+  /** Rename inline layer (Ctrl/⌘+R di pohon Layers): satu op `update` nama; nama sama/kosong → tanpa tulis. */
+  const renameLayer = useCallback(
+    (id: string, name: string) => {
+      const d = docRef.current;
+      const before = d ? findNode(d, id)?.name : undefined;
+      const next = name.trim();
+      if (!next || next === before || !editableRef.current || editing.current > 0) return;
+      void applyEdit([{ op: 'update', id, patch: { name: next } }], `Rename to ${next}`);
+    },
+    [applyEdit],
+  );
+  /** F6 (paritas Figma): siklus fokus antar region — sidebar kiri, canvas, panel kanan. Kontainer region
+   * fokusable (`tabIndex={-1}`): F6 memindahkan fokus ke region, Tab/Shift+Tab tetap milik elemen di dalamnya. */
+  const cycleFocusRegion = useCallback(() => {
+    const regions = ['.layers-panel', '.canvas', '.panel-body'].map((s) => document.querySelector<HTMLElement>(s)).filter((el): el is HTMLElement => el !== null);
+    const active = document.activeElement;
+    const at = regions.findIndex((r) => r === active || r.contains(active));
+    regions[(at + 1) % regions.length]?.focus();
+  }, []);
 
   // ---- Aksi edit (story 6): group, ungroup, duplikat, hapus, urutan z, align, distribute, nudge, pilih semua ----
   // Plan murni dari editActions.ts atas geometri halaman (Canvas mengisi `sceneRef`), satu permintaan ops per aksi,
@@ -1266,19 +1315,121 @@ export function Viewer({ slug }: { slug: string }) {
     nudge.current.dx = 0;
     nudge.current.dy = 0;
   }, [selection]);
+  /** Node tersimpan yang relevan untuk rotate/gaya teks: anggota teratas seleksi + properti dari dokumen terkini. */
+  const styledNodes = useCallback((): StyledNode[] => {
+    const d = docRef.current;
+    const scene = sceneRef.current?.() ?? [];
+    return topMost(indexGeo(scene), selectionRef.current).flatMap((g) => {
+      const s = d ? findNode(d, g.id) : undefined;
+      if (!s) return [];
+      return [
+        {
+          id: g.id,
+          name: g.name,
+          type: g.type,
+          ...(typeof s.rotation === 'number' ? { rotation: s.rotation } : {}),
+          ...(typeof s.width === 'number' ? { width: s.width } : {}),
+          ...(typeof s.height === 'number' ? { height: s.height } : {}),
+          ...(typeof s.weight === 'number' ? { weight: s.weight } : {}),
+          ...(typeof s.style === 'string' ? { style: s.style } : {}),
+          ...(typeof s.decoration === 'string' ? { decoration: s.decoration } : {}),
+          ...(typeof s.size === 'number' ? { size: s.size } : {}),
+          ...(typeof s.lineHeight === 'number' ? { lineHeight: s.lineHeight } : {}),
+          ...(typeof s.letterSpacing === 'number' ? { letterSpacing: s.letterSpacing } : {}),
+        },
+      ];
+    });
+  }, []);
   // Shortcut aksi (bukan saat mengetik, termasuk teks yang diedit inline, atau dialog/menu terbuka).
   useEffect(() => {
     if (!editable) return;
     const onKey = (e: KeyboardEvent) => {
-      if (typingTarget(e) || document.querySelector('.modal-scrim, .menu-layer')) return;
+      if (document.querySelector('.modal-scrim, .menu-layer')) return;
       const s = shortcutAction(e);
       if (!s) return;
+      // Di kolom ketik hanya kombo gaya teks (B/I/U, <>) yang jalan — mem-patch properti node teks terpilih.
+      if (typingTarget(e) && !('textStyle' in s)) return;
       if ('selectAll' in s) {
         e.preventDefault();
         setSelection(selectAllIds(sceneRef.current?.() ?? [], selectionRef.current));
         return;
       }
+      if ('selectInverse' in s) {
+        e.preventDefault();
+        setSelection(selectInverseIds(sceneRef.current?.() ?? [], selectionRef.current));
+        return;
+      }
+      // Navigasi seleksi (Figma): Enter masuk kontainer, Shift+Enter/`\' parent, Tab/Shift+Tab sibling.
+      if ('enter' in s || 'parent' in s || 'sibling' in s) {
+        if (e.target instanceof Element && e.target.closest('button, a, [role="menuitem"], [role="treeitem"]')) return;
+        const scene = sceneRef.current?.() ?? [];
+        const sel = selectionRef.current;
+        const next = 'enter' in s ? enterChildId(scene, sel) : 'parent' in s ? parentIdOf(scene, sel) : siblingIdOf(scene, sel, s.sibling);
+        if (next) {
+          e.preventDefault();
+          setSelection([next]);
+        }
+        return;
+      }
       if (!selectionRef.current.length) return;
+      if ('rename' in s) {
+        e.preventDefault();
+        setRenaming(selectionRef.current[selectionRef.current.length - 1]);
+        return;
+      }
+      if ('gotoMain' in s) {
+        const d = docRef.current;
+        const primary = selectionRef.current[selectionRef.current.length - 1];
+        const n = primary && d ? findNode(d, primary) : undefined;
+        const mid = n && typeof n.componentId === 'string' ? n.componentId : undefined;
+        if (mid) {
+          e.preventDefault();
+          setSelection([mid]);
+        }
+        return;
+      }
+      if ('multiVariant' in s) {
+        const d = docRef.current;
+        const info = latestComponentsRef.current;
+        const primary = selectionRef.current[selectionRef.current.length - 1];
+        const own = primary && d ? findNode(d, primary) : undefined;
+        // Master varian langsung, atau instance → set dari master anchor-nya.
+        const vo = (own as { variantOf?: { set?: string } } | undefined)?.variantOf;
+        const anchor = own && d ? findNode(d, String((own as { componentId?: unknown }).componentId ?? '')) : undefined;
+        const setName = vo?.set ?? (anchor as { variantOf?: { set?: string } } | undefined)?.variantOf?.set;
+        if (setName && info && d) {
+          const ids = info.masters.filter((m) => (findNode(d, m.id) as { variantOf?: { set?: string } } | undefined)?.variantOf?.set === setName).map((m) => m.id);
+          if (ids.length > 1) {
+            e.preventDefault();
+            setSelection(ids);
+          }
+        }
+        return;
+      }
+      if ('rotate' in s) {
+        const plan = rotateOps(styledNodes(), s.rotate);
+        if (plan) {
+          e.preventDefault();
+          void runPlan(plan, false);
+        }
+        return;
+      }
+      if ('resize' in s) {
+        const plan = resizeOps(styledNodes(), s.resize[0], s.resize[1]);
+        if (plan) {
+          e.preventDefault();
+          void runPlan(plan, false);
+        }
+        return;
+      }
+      if ('textStyle' in s) {
+        const plan = textStyleOps(styledNodes(), s.textStyle);
+        if (plan) {
+          e.preventDefault();
+          void runPlan(plan, false);
+        }
+        return;
+      }
       if ('action' in s) {
         e.preventDefault();
         if (!e.repeat) runAction(s.action);
@@ -1293,7 +1444,31 @@ export function Viewer({ slug }: { slug: string }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editable, runAction, flushNudge]);
+  }, [editable, runAction, runPlan, flushNudge, styledNodes]);
+  // Kunci tampilan (tetap berlaku read-only): tab, komentar/kursor, outline, panel shortcut, present, F6.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (typingTarget(e) || document.querySelector('.modal-scrim, .menu-layer')) return;
+      const v = viewShortcut(e);
+      if (!v) return;
+      e.preventDefault();
+      if (v.view === 'tab') {
+        setLeftTab((['layers', 'assets', 'comments'] as const)[v.tab ?? 0] ?? 'layers');
+        // Sidebar kiri terlipat/drawer tertutup → buka dulu supaya tab terlihat (paritas Figma ⌥1/2/3).
+        if (sidebars.collapsed.left) toggleSidebar('left', true);
+        setLayersOpen(true);
+      }
+      else if (v.view === 'toggle-proto') setTab((t) => (t === 'prototype' ? 'design' : 'prototype'));
+      else if (v.view === 'comments') setCommentsHidden((h) => !h);
+      else if (v.view === 'cursors') setCursorsHidden((h) => !h);
+      else if (v.view === 'outline') setOutline((o) => !o);
+      else if (v.view === 'shortcuts') setShortcutsOpen((o) => !o);
+      else if (v.view === 'present') location.hash = presentHash(slug);
+      else if (v.view === 'focus-cycle') cycleFocusRegion();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [slug, sidebars.collapsed.left, toggleSidebar, cycleFocusRegion]);
   /** Menu konteks aksi (canvas live / baris Layers) dengan seleksi saat dibuka. */
   const [editMenu, setEditMenu] = useState<{ x: number; y: number; ids: string[] } | undefined>(undefined);
   const openLayerMenu = useCallback((id: string, x: number, y: number) => {
@@ -1700,7 +1875,7 @@ export function Viewer({ slug }: { slug: string }) {
           Share
         </button>
       </header>
-      <aside className="layers-panel">
+      <aside className="layers-panel" tabIndex={-1}>
         <div className="file-header">
           <div className="file-row">
             <div className="file-title" title={slug}>
@@ -1857,7 +2032,7 @@ export function Viewer({ slug }: { slug: string }) {
             </span>
             <AddLayerButton disabled={!editable} disabledReason={preview ? 'Not available while previewing a version' : 'lakard is offline'} hasBoard={boards.length > 0} onPick={onMenuInsert} onImportUrl={() => setImportUrlOpen(true)} />
           </div>
-          {boards.length === 0 ? <div className="muted-note">No layers yet</div> : <LayerTree key={page?.id} nodes={treeBoards} kinds={components?.kinds} selectedId={selectedId} selectedIds={selection} selectedPath={selectedInfo} index={index} onSelect={select} onToggle={toggleSelect} onMenu={openLayerMenu} marks={preview ? undefined : marks} />}
+          {boards.length === 0 ? <div className="muted-note">No layers yet</div> : <LayerTree key={page?.id} nodes={treeBoards} kinds={components?.kinds} selectedId={selectedId} selectedIds={selection} selectedPath={selectedInfo} index={index} onSelect={select} onToggle={toggleSelect} onMenu={openLayerMenu} marks={preview ? undefined : marks} renaming={renaming} onRename={renameLayer} onRenameEnd={() => setRenaming(undefined)} />}
         </div>
           </>
         )}
@@ -1880,7 +2055,7 @@ export function Viewer({ slug }: { slug: string }) {
         boards={boards}
         onHugHeight={onHugHeight}
         presence={presence}
-        peers={roomPeers.length > 0 ? canvasPeers : undefined}
+        peers={roomPeers.length > 0 && !cursorsHidden ? canvasPeers : undefined}
         onCursor={room.joined ? publishPresence : undefined}
         pending={pending}
         fades={fades}
@@ -1913,7 +2088,8 @@ export function Viewer({ slug }: { slug: string }) {
         onFramePreset={editable ? onFramePreset : undefined}
         docEmpty={!docHasBoards}
         stale={offline ? relativeTime(lastSync.current, now) : undefined}
-        comments={canvasComments}
+        comments={commentsHidden ? undefined : canvasComments}
+        outline={outline}
         onCommentAt={onCommentAt}
         overlay={
           <>
@@ -1937,7 +2113,7 @@ export function Viewer({ slug }: { slug: string }) {
       />
 
       <BottomSheet state={sheet} onState={setSheet} tabs={TABS} tab={tab} onTab={openTab}>
-        <div className="panel-body">
+        <div className="panel-body" tabIndex={-1}>
           {tab === 'design' && (
             <DesignPanel
               targets={designTargets}
@@ -2053,6 +2229,7 @@ export function Viewer({ slug }: { slug: string }) {
         />
       )}
       {restoreAsk && <RestoreDialog entry={restoreAsk} busy={restoring} error={restoreError} onCancel={() => !restoring && setRestoreAsk(undefined)} onConfirm={() => restore(restoreAsk)} />}
+      {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
     </div>
   );
 }
@@ -2092,6 +2269,9 @@ function LayerTree({
   onMenu,
   marks,
   kinds,
+  renaming,
+  onRename,
+  onRenameEnd,
 }: {
   /** Master/instance tersimpan (epic komponen story 4): ikon component/diamond ungu. */
   kinds?: ReadonlyMap<string, 'master' | 'instance'> | undefined;
@@ -2108,6 +2288,12 @@ function LayerTree({
   onSelect: (id: string) => void;
   /** State agen per baris (aplikasi 5): agent (working), created (slide-in), changed (titik memudar). */
   marks?: ReadonlyMap<string, LayerMarkInfo> | undefined;
+  /** Baris yang sedang di-rename inline (Ctrl/⌘+R); labelnya menjadi input. */
+  renaming?: string | undefined;
+  /** Commit rename: dipanggil dengan (id, nama baru); nama sama/kosong → tanpa tulis di pemanggil. */
+  onRename?: ((id: string, name: string) => void) | undefined;
+  /** Tutup input rename (sesudah commit atau Escape/blur batal). */
+  onRenameEnd?: (() => void) | undefined;
 }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set(nodes.map((n) => n.id)));
   // Buka leluhur node terpilih (mis. dipilih dari Checks) supaya barisnya terlihat.
@@ -2177,7 +2363,25 @@ function LayerTree({
         ) : (
           <Icon name={isImageNode(n) ? 'image' : (NODE_ICON[n.type] ?? 'square')} size={13} className="type-icon" />
         )}
-        <span className="layer-label">{n.name}</span>
+        {renaming === n.id ? (
+          <input
+            className="layer-rename"
+            defaultValue={n.name}
+            autoFocus
+            onFocus={(e) => e.currentTarget.select()}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                onRename?.(n.id, e.currentTarget.value);
+                onRenameEnd?.();
+              } else if (e.key === 'Escape') onRenameEnd?.();
+            }}
+            onBlur={onRenameEnd}
+          />
+        ) : (
+          <span className="layer-label">{n.name}</span>
+        )}
         {/* Kunci per execute: execute berikutnya pada node yang sama memutar ulang pudar titik. */}
         {(mark === 'agent' || mark === 'changed') && <i key={m?.key ?? mark} className="layer-agent-dot" aria-hidden="true" />}
       </div>,

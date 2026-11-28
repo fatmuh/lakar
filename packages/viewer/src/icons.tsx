@@ -129,6 +129,9 @@ const ICONS = {
   ungroup: [['rect', 5, 4, 8, 6, 1], ['rect', 11, 14, 8, 6, 1]],
   bringForward: [['rect', 8, 8, 8, 8, 2], ['path', 'M4 10a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2M14 20a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2']],
   sendBackward: [['rect', 14, 14, 8, 8, 2], ['rect', 2, 2, 8, 8, 2], ['path', 'M7 14v1a2 2 0 0 0 2 2h1M14 7h1a2 2 0 0 1 2 2v1']],
+  // Paritas Figma (spec-canvas-shortcuts): bring-to-front/send-to-back.
+  bringToFront: [['rect', 8, 8, 8, 8, 2], ['path', 'M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2']],
+  sendToBack: [['rect', 8, 8, 8, 8, 2], ['path', 'M20 8a2 2 0 0 0 2-2 2 2 0 0 0-2-2h-10a2 2 0 0 0-2 2M4 8v6a2 2 0 0 0 2 2h2']],
   alignLeft: [['rect', 6, 14, 9, 6, 2], ['rect', 6, 4, 16, 6, 2], ['path', 'M2 2v20']],
   alignCenterX: [['path', 'M12 2v20M8 10H4a2 2 0 0 1-2-2V6c0-1.1.9-2 2-2h4M16 10h4a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-4M8 20H7a2 2 0 0 1-2-2v-2c0-1.1.9-2 2-2h1M16 14h1a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-1']],
   alignRight: [['rect', 2, 4, 16, 6, 2], ['rect', 9, 14, 9, 6, 2], ['path', 'M22 22V2']],
