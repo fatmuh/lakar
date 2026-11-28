@@ -67,6 +67,7 @@ import {
   formatDash,
   isVectorSelection,
   MITER_MAX,
+  VECTOR_DEFAULTS,
   parseDash,
   parseMiter,
   setVector,
@@ -495,6 +496,8 @@ type FieldProps = {
   scrub?: { step: number; min?: number; max?: number; base?: number | undefined; toValue?: (n: number) => unknown } | undefined;
   /** Teks redup saat kosong (mis. ukuran terukur, "Auto"). */
   placeholder?: string | undefined;
+  /** Nama aksesibel bila berbeda dari teks lead (mis. lead "T" → "Top padding"). */
+  ariaLabel?: string | undefined;
   /** Teks redup di ujung field (mis. "wrap only" pada Row gap). */
   hint?: string | undefined;
   /** Elemen di ujung field sesudah nilai (mis. chip resize Fixed/Hug/Fill pada W/H). */
@@ -509,7 +512,7 @@ type FieldProps = {
  * Kolom angka/teks (komponen Field): Enter/blur commit, Escape batal, ref token = chip (klik → input berisi nilai
  * resolve; nilai sama = ref tetap). Scrub: drag horizontal pada label, pratinjau hanya di kolom, commit saat lepas.
  */
-function Field({ label, icon, state, format, parse, onCommit, disabled, scrub, placeholder, hint, trailing, className, title, token: slot }: FieldProps) {
+function Field({ label, icon, state, format, parse, onCommit, disabled, scrub, placeholder, ariaLabel, hint, trailing, className, title, token: slot }: FieldProps) {
   const [draft, setDraft] = useState<string | undefined>(undefined);
   const [scrubText, setScrubText] = useState<string | undefined>(undefined);
   const input = useRef<HTMLInputElement>(null);
@@ -596,7 +599,7 @@ function Field({ label, icon, state, format, parse, onCommit, disabled, scrub, p
         <input
           ref={input}
           className="dp-field-value"
-          aria-label={label}
+          aria-label={ariaLabel ?? label}
           value={scrubText ?? draft ?? shown}
           placeholder={state.mixed ? 'Mixed' : placeholder}
           disabled={disabled}
@@ -934,9 +937,10 @@ const parsePositive = (t: string) => {
   return n !== undefined && n > 0 ? n : undefined;
 };
 const hexText = (c: unknown) => splitHex(c)?.hex ?? '';
+const pctText = (n: number) => String(Math.round(n * 100));
 const alphaText = (c: unknown) => {
   const s = splitHex(c);
-  return s ? formatPercent(s.alpha) : '';
+  return s ? pctText(s.alpha) : '';
 };
 /** Warna (literal atau resolve) → CSS swatch. */
 const swatchCss = (c: unknown) => (typeof c === 'string' && splitHex(c) ? c : 'transparent');
@@ -1003,7 +1007,7 @@ const BOARD_HEIGHT_SIZING: { value: Sizing; label: string }[] = SIZING_OPTIONS.s
 type AlignCtl = NonNullable<DesignPanelProps['align']>;
 
 /** Tombol ikon yang membuka `Menu` di bawah dirinya sendiri (chip sizing, sides stroke, blend, "+", overflow align). */
-function MenuButton({ icon, title, items, disabled, className, label }: { icon: IconName; title: string; items: () => Item[]; disabled: boolean; className?: string; label?: string }) {
+function MenuButton({ icon, title, items, disabled, className, label, closeOnPick = true }: { icon: IconName; title: string; items: () => Item[]; disabled: boolean; className?: string; label?: string; /** `false` = menu tetap terbuka setelah memilih (toggle multi-pilih seperti sides stroke). */ closeOnPick?: boolean }) {
   const [pos, setPos] = useState<{ x: number; y: number } | undefined>(undefined);
   return (
     <>
@@ -1023,7 +1027,20 @@ function MenuButton({ icon, title, items, disabled, className, label }: { icon: 
         <Icon name={icon} size={13} />
         {label}
       </button>
-      {pos && <Menu x={pos.x} y={pos.y} items={items()} onClose={() => setPos(undefined)} />}
+      {pos && (
+        <Menu
+          x={pos.x}
+          y={pos.y}
+          items={items().map((it) => ({
+            ...it,
+            run: () => {
+              if (closeOnPick) setPos(undefined);
+              it.run();
+            },
+          }))}
+          onClose={() => setPos(undefined)}
+        />
+      )}
     </>
   );
 }
@@ -1038,7 +1055,7 @@ function SizingChip({ axis, mode, options, disabled, onPick }: { axis: Axis; mod
         type="button"
         className="dp-chip"
         title={`${axis === 'width' ? 'Width' : 'Height'} sizing`}
-        aria-label={`${axis === 'width' ? 'Width' : 'Height'} sizing`}
+        aria-label={`${axis === 'width' ? 'Width' : 'Height'} sizing: ${text}`}
         aria-haspopup="menu"
         aria-expanded={pos !== undefined}
         disabled={disabled}
@@ -1071,7 +1088,7 @@ function SizingChip({ axis, mode, options, disabled, onPick }: { axis: Axis; mod
 
 /**
  * Bilah Align & distribute di atas bagian Position (desain badge 1): 6 align + 2 distribute. Di panel sempit
- * (≤ 260px, E5) dua tombol distribute disembunyikan CSS dan masuk menu "···" — menyusut, bukan scroll.
+ * (< 280px, E5) dua tombol distribute disembunyikan CSS dan masuk menu "···" — menyusut, bukan scroll.
  */
 function AlignBar({ align, disabled }: { align: AlignCtl; disabled: boolean }) {
   const [more, setMore] = useState<{ x: number; y: number } | undefined>(undefined);
@@ -1120,36 +1137,86 @@ function AlignBar({ align, disabled }: { align: AlignCtl; disabled: boolean }) {
 }
 
 /**
- * Grid alignment 3×3 (desain Auto layout, E4): sel = align (baris) × justify (kolom), start/center/end. Klik
- * menulis kedua properti dalam satu commit; nilai lain (stretch, space-between) tidak punya sel aktif.
+ * Grid alignment 3×3 (desain Auto layout, E4): baris sel = posisi vertikal, kolom sel = posisi horizontal.
+ * Sumbu utama flex mengikuti arah layout (column: justify = vertikal, align = horizontal — css.ts), jadi baris
+ * sel memetakan justify dan kolom sel memetakan align; row/grid memetakan standar. Klik menulis kedua properti dalam satu commit; `stretch`
+ * dan `space-between` tidak punya sel — space-between dipertahankan (hanya sumbu silang yang ditulis, spt Figma).
  */
-function AlignGrid({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
+function AlignGrid({ targets, ctx, layout }: { targets: DesignTarget[]; ctx: Ctx; layout: 'row' | 'column' | 'grid' | 'none' | undefined }) {
   const align = readField(targets, (n) => n.align ?? 'start');
   const justify = readField(targets, (n) => n.justify ?? 'start');
   const AXES = ['start', 'center', 'end'] as const;
-  const on = (a: string, j: string) => !align.mixed && !justify.mixed && align.value === a && justify.value === j;
+  const col = layout === 'column';
+  const value = (r: string, c: string) => (col ? { align: c, justify: r } : { align: r, justify: c });
+  const on = (v: { align: string; justify: string }) => !align.mixed && !justify.mixed && align.value === v.align && justify.value === v.justify;
   return (
     <div className="dp-agrid" role="group" aria-label="Alignment">
-      {AXES.map((a) =>
-        AXES.map((j) => (
-          <button
-            key={`${a}-${j}`}
-            type="button"
-            className={`dp-agrid-cell${on(a, j) ? ' active' : ''}`}
-            aria-label={`Align ${a}, justify ${j}`}
-            aria-pressed={on(a, j)}
-            disabled={ctx.disabled}
-            onClick={() => ctx.run((ts) => opsFor(ts, () => ({ align: a, justify: j })), 'Change alignment')}
-          />
-        )),
+      {AXES.map((r) =>
+        AXES.map((c) => {
+          const v = value(r, c);
+          return (
+            <button
+              key={`${r}-${c}`}
+              type="button"
+              className={`dp-agrid-cell${on(v) ? ' active' : ''}`}
+              aria-label={`Align ${v.align}, justify ${v.justify}`}
+              aria-pressed={on(v)}
+              disabled={ctx.disabled}
+              onClick={() =>
+                ctx.run(
+                  (ts) => opsFor(ts, (t) => (t.stored.justify === 'space-between' ? { align: v.align } : v)),
+                  'Change alignment',
+                )
+              }
+            />
+          );
+        }),
       )}
     </div>
   );
 }
 
-function PositionGroup({ targets, ctx, bounds, align }: { targets: DesignTarget[]; ctx: Ctx; bounds: [number, number, number, number] | undefined; align: AlignCtl | undefined }) {
-  const xyEditable = targets.every(canEditXY);
+/** Field W/H + chip sizing per sumbu di ujung kanan (desain: "W 1440 · Fill ▾"), menggantikan segmented Fixed/Hug/Fill. */
+function DimField({ targets, ctx, axis }: { targets: DesignTarget[]; ctx: Ctx; axis: Axis }) {
   const board = targets.every((t) => t.type === 'board');
+  const label = axis === 'width' ? 'W' : 'H';
+  const state = readField(targets, (n) => n[axis]);
+  const mode = readSizing(targets, axis);
+  const measured = targets.length === 1 ? targets[0]!.measured?.[axis === 'width' ? 'w' : 'h'] : undefined;
+  const numeric: FieldState = state.mixed || typeof state.value === 'number' || isTokenRef(state.value) ? state : { mixed: false, value: undefined, resolved: undefined };
+  return (
+    <Field
+      label={label}
+      state={numeric}
+      format={num}
+      parse={parseSize}
+      placeholder={measured !== undefined ? formatNumber(measured) : mode === 'fill' ? 'Fill' : 'Hug'}
+      disabled={ctx.disabled}
+      scrub={{ step: 1, min: 0, base: measured }}
+      token={{ spec: propSpec(axis, axis === 'width' ? 'Width' : 'Height'), ctx }}
+      trailing={
+        /* Board: hanya tinggi yang bisa Hug (v8, spec-board-hug-height); lebar board selalu angka, tanpa Fill. */
+        (!board || axis === 'height') && (
+          <SizingChip axis={axis} mode={mode} options={board ? BOARD_HEIGHT_SIZING : SIZING_OPTIONS} disabled={ctx.disabled} onPick={(m) => ctx.run((ts) => setSizing(ts, axis, m), `Change ${axis} sizing`)} />
+        )
+      }
+      onCommit={(v) => ctx.run((ts) => setProp(ts, axis, Math.round(Number(v) * 100) / 100), `Change ${axis}`)}
+    />
+  );
+}
+
+/** Baris W/H dua kolom (desain Auto layout badge 2: W dan H satu baris sesudah baris arah). */
+function DimRow({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
+  return (
+    <div className="dp-row">
+      <DimField targets={targets} ctx={ctx} axis="width" />
+      <DimField targets={targets} ctx={ctx} axis="height" />
+    </div>
+  );
+}
+
+function PositionGroup({ targets, ctx, bounds, align, dims }: { targets: DesignTarget[]; ctx: Ctx; bounds: [number, number, number, number] | undefined; align: AlignCtl | undefined; dims: boolean }) {
+  const xyEditable = targets.every(canEditXY);
   const icon = targets.every((t) => t.type === 'icon');
   const xy = (axis: 'x' | 'y', i: 0 | 1) => {
     const state: FieldState = xyEditable
@@ -1169,35 +1236,6 @@ function PositionGroup({ targets, ctx, bounds, align }: { targets: DesignTarget[
       />
     );
   };
-  // Field W/H + chip sizing per sumbu di ujung kanan (desain: "W 1440 · Fill ▾"), menggantikan segmented Fixed/Hug/Fill.
-  const dim = (axis: Axis) => {
-    const label = axis === 'width' ? 'W' : 'H';
-    const state = readField(targets, (n) => n[axis]);
-    const mode = readSizing(targets, axis);
-    const measured = targets.length === 1 ? targets[0]!.measured?.[axis === 'width' ? 'w' : 'h'] : undefined;
-    const numeric: FieldState = state.mixed || typeof state.value === 'number' || isTokenRef(state.value) ? state : { mixed: false, value: undefined, resolved: undefined };
-    return (
-      <div className="dp-row">
-        <Field
-          label={label}
-          state={numeric}
-          format={num}
-          parse={parseSize}
-          placeholder={measured !== undefined ? formatNumber(measured) : mode === 'fill' ? 'Fill' : 'Hug'}
-          disabled={ctx.disabled}
-          scrub={{ step: 1, min: 0, base: measured }}
-          token={{ spec: propSpec(axis, axis === 'width' ? 'Width' : 'Height'), ctx }}
-          trailing={
-            /* Board: hanya tinggi yang bisa Hug (v8, spec-board-hug-height); lebar board selalu angka, tanpa Fill. */
-            (!board || axis === 'height') && (
-              <SizingChip axis={axis} mode={mode} options={board ? BOARD_HEIGHT_SIZING : SIZING_OPTIONS} disabled={ctx.disabled} onPick={(m) => ctx.run((ts) => setSizing(ts, axis, m), `Change ${axis} sizing`)} />
-            )
-          }
-          onCommit={(v) => ctx.run((ts) => setProp(ts, axis, Math.round(Number(v) * 100) / 100), `Change ${axis}`)}
-        />
-      </div>
-    );
-  };
   return (
     <Group title="Position">
       {align && <AlignBar align={align} disabled={ctx.disabled} />}
@@ -1205,8 +1243,8 @@ function PositionGroup({ targets, ctx, bounds, align }: { targets: DesignTarget[
         {xy('x', 0)}
         {xy('y', 1)}
       </div>
-      {!icon && dim('width')}
-      {!icon && dim('height')}
+      {/* Tipe tanpa seksi Auto layout (board/teks/dll) tetap menyunting W/H di Position (desain badge 2). */}
+      {!icon && dims && <DimRow targets={targets} ctx={ctx} />}
     </Group>
   );
 }
@@ -1220,6 +1258,11 @@ function AutoLayoutGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }
   const wrapOn = !wrap.mixed && wrap.value === true;
   const align = readField(targets, (n) => n.align ?? 'start');
   const stretched = !align.mixed && align.value === 'stretch';
+  // Align non-stretch terakhir diingat (Figma): mematikan Stretch mengembalikan align itu, bukan selalu 'start'.
+  const prevAlign = useRef<unknown>('start');
+  useEffect(() => {
+    if (!align.mixed && align.value !== 'stretch') prevAlign.current = align.value ?? 'start';
+  }, [align.mixed, align.mixed ? undefined : align.value]);
   // Independent padding: tuple 4 sisi membuka mode ini otomatis (E4); toggle square-dashed di ujung baris Pad.
   const padRaw = readField(targets, (n) => n.padding);
   const pad4 = !padRaw.mixed && Array.isArray(padRaw.value) && (padRaw.value as unknown[]).length === 4;
@@ -1256,38 +1299,42 @@ function AutoLayoutGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }
       token={{ spec: paddingAxisSpec(axis, label), ctx }}
     />
   );
-  const PAD_EDGES: { label: string; icon: IconName }[] = [
-    { label: 'Top padding', icon: 'arrowUp' },
-    { label: 'Right padding', icon: 'arrowRight' },
-    { label: 'Bottom padding', icon: 'arrowDown' },
-    { label: 'Left padding', icon: 'arrowLeft' },
+  const PAD_EDGES: { label: string; aria: string }[] = [
+    { label: 'T', aria: 'Top padding' },
+    { label: 'R', aria: 'Right padding' },
+    { label: 'B', aria: 'Bottom padding' },
+    { label: 'L', aria: 'Left padding' },
   ];
-  const justify = <SelectField ariaLabel="Justify" state={readField(targets, (n) => n.justify ?? 'start')} options={JUSTIFY_OPTIONS} disabled={ctx.disabled} onPick={(v) => ctx.run((ts) => setProp(ts, 'justify', v), 'Change justify')} />;
-  const padRow = (
-    <>
-      <div className="dp-row">
-        {padAxis('h', 'moveHorizontal', 'Horizontal padding')}
-        {padAxis('v', 'moveVertical', 'Vertical padding')}
-        <button
-          type="button"
-          className={`dp-icon-btn boxed${padInd ? ' filled' : ''}`}
-          title="Independent padding"
-          aria-label="Independent padding"
-          aria-pressed={padInd}
-          disabled={ctx.disabled}
-          onClick={() => setPadInd((p) => !p)}
-        >
-          <Icon name="squareDashed" size={13} />
-        </button>
+  const justify = <SelectField label="Justify" state={readField(targets, (n) => n.justify ?? 'start')} options={JUSTIFY_OPTIONS} disabled={ctx.disabled} onPick={(v) => ctx.run((ts) => setProp(ts, 'justify', v), 'Change justify')} />;
+  const padToggle = (
+    <button
+      type="button"
+      className={`dp-icon-btn boxed${padInd ? ' active' : ''}`}
+      title="Independent padding"
+      aria-label="Independent padding"
+      aria-pressed={padInd}
+      disabled={ctx.disabled}
+      onClick={() => setPadInd((p) => !p)}
+    >
+      <Icon name="squareDashed" size={13} />
+    </button>
+  );
+  // Mode independent mengganti baris H/V di tempat dengan grid 2×2 (desain E4); toggle tetap di ujung baris.
+  const padRow = padInd ? (
+    <div className="dp-row">
+      <div className="dp-pad4">
+        {PAD_EDGES.map((e, i) => (
+          <Field key={e.aria} label={e.label} ariaLabel={e.aria} title={e.aria} state={readField(targets, (n) => paddingEdgeOf(n, i))} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setPaddingEdge(ts, i, v), 'Change padding')} token={{ spec: paddingEdgeSpec(i, e.aria), ctx }} />
+        ))}
       </div>
-      {padInd && (
-        <div className="dp-row dp-pad4">
-          {PAD_EDGES.map((e, i) => (
-            <Field key={e.label} label={e.label} icon={e.icon} title={e.label} state={readField(targets, (n) => paddingEdgeOf(n, i))} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setPaddingEdge(ts, i, v), 'Change padding')} token={{ spec: paddingEdgeSpec(i, e.label), ctx }} />
-          ))}
-        </div>
-      )}
-    </>
+      {padToggle}
+    </div>
+  ) : (
+    <div className="dp-row">
+      {padAxis('h', 'moveHorizontal', 'Horizontal padding')}
+      {padAxis('v', 'moveVertical', 'Vertical padding')}
+      {padToggle}
+    </div>
   );
   return (
     <Group
@@ -1318,7 +1365,7 @@ function AutoLayoutGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }
         {!grid && (on || dir.mixed) && (
           <button
             type="button"
-            className={`dp-icon-btn boxed${wrapOn ? ' filled' : ''}`}
+            className={`dp-icon-btn boxed${wrapOn ? ' active' : ''}`}
             title="Wrap"
             aria-label="Wrap"
             aria-pressed={wrapOn}
@@ -1331,20 +1378,22 @@ function AutoLayoutGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }
         {on && (
           <button
             type="button"
-            className={`dp-icon-btn boxed${stretched ? ' filled' : ''}`}
+            className={`dp-icon-btn boxed${stretched ? ' active' : ''}`}
             title="Stretch"
             aria-label="Stretch"
             aria-pressed={stretched}
             disabled={ctx.disabled}
-            onClick={() => ctx.run((ts) => setProp(ts, 'align', stretched ? 'start' : 'stretch'), 'Change align')}
+            onClick={() => ctx.run((ts) => setProp(ts, 'align', stretched ? prevAlign.current : 'stretch'), 'Change align')}
           >
             <Icon name="stretchVertical" size={13} />
           </button>
         )}
       </div>
+      {/* W/H (desain badge 2): dua kolom di dalam seksi Auto layout, sesudah baris arah — selalu tampil untuk frame. */}
+      <DimRow targets={targets} ctx={ctx} />
       {(on || dir.mixed) && (
         <div className="dp-row dp-auto-grid">
-          <AlignGrid targets={targets} ctx={ctx} />
+          <AlignGrid targets={targets} ctx={ctx} layout={layout} />
           <div className="dp-col">
             {grid ? axisGap('columnGap', 'Column gap', 'betweenHorizontalStart') : <Field label="Gap" icon={layout === 'row' ? 'betweenHorizontalStart' : 'betweenVerticalStart'} state={readField(targets, (n) => n.gap ?? 0)} format={num} parse={(t) => parseNumber(t)} scrub={{ step: 1 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setProp(ts, 'gap', v), 'Change gap')} token={{ spec: propSpec('gap', 'Gap', (n) => n.gap ?? 0), ctx }} />}
             {axisGap('rowGap', 'Row gap', 'betweenVerticalStart', !grid && !wrapOn ? 'wrap only' : undefined, !grid && !wrapOn)}
@@ -1551,7 +1600,7 @@ function FillEditor({ index, fill, resolved, ctx }: { index: number; fill: FillL
             <InlineInput
               label="Stop position"
               className="dp-opacity"
-              value={typeof s.offset === 'number' ? formatPercent(s.offset) : ''}
+              value={typeof s.offset === 'number' ? pctText(s.offset) : ''}
               disabled={ctx.disabled}
               onCommit={(t) => {
                 const n = parseNumber(t.replace(/%$/, ''));
@@ -1573,7 +1622,7 @@ function FillGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
   if (all.mixed) {
     return (
       <Group title="Fill" action={add}>
-        {/* Baris "Mixed fills" (E2): swatch stripe, nilai redup; klik swatch tetap memilih satu solid untuk semua. */}
+        {/* Baris "Mixed fills" (E2): swatch stripe + input hex (placeholder "Mixed fills"); satu warna meng-unify semua. */}
         <PaintRow
           disabled={ctx.disabled}
           onRemove={() => ctx.run((ts) => setAllFills(ts, null), 'Remove fills')}
@@ -1590,7 +1639,18 @@ function FillGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
               }}
             />
           }
-          value={<span className="dp-muted">Mixed fills</span>}
+          value={
+            <InlineInput
+              label="Hex color"
+              value=""
+              placeholder="Mixed fills"
+              disabled={ctx.disabled}
+              onCommit={(t) => {
+                const next = parseHex(t) && changeColor(undefined, { hex: t });
+                if (next) ctx.run((ts) => setAllFills(ts, [{ type: 'solid', color: next }]), 'Change fill');
+              }}
+            />
+          }
         />
       </Group>
     );
@@ -1698,7 +1758,18 @@ function StrokeGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
   const align = readField(targets, (n) => (n.stroke as Raw | undefined)?.align);
   const sides = readField(targets, (n) => strokeSides(n.stroke));
   const vector = isVectorSelection(targets);
-  const [adv, setAdv] = useState(false);
+  // Blok lanjutan (E3) terbuka sendiri bila salah satu nilai bukan default — sama seperti padding/radius tuple.
+  const advNonDefault = targets.some(
+    (t) =>
+      vectorValue(t.stored, 'strokeLinecap') !== VECTOR_DEFAULTS.strokeLinecap ||
+      vectorValue(t.stored, 'strokeLinejoin') !== VECTOR_DEFAULTS.strokeLinejoin ||
+      vectorValue(t.stored, 'strokeMiterlimit') !== VECTOR_DEFAULTS.strokeMiterlimit ||
+      (Array.isArray(t.stored.strokeDasharray) && t.stored.strokeDasharray.length > 0),
+  );
+  const [adv, setAdv] = useState(advNonDefault);
+  useEffect(() => {
+    if (advNonDefault) setAdv(true);
+  }, [advNonDefault]);
   const sideActive = (s: Side) => !sides.mixed && (sides.value as Side[]).includes(s);
   return (
     <Group
@@ -1734,10 +1805,12 @@ function StrokeGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
               disabled={ctx.disabled || !has}
               onPick={(v) => ctx.run((ts) => setStroke(ts, { align: v }), 'Change stroke align')}
             />
-            <Field className="dp-w64" label="W" state={width} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled || !has} onCommit={(v) => ctx.run((ts) => setStroke(ts, { width: v }), 'Change stroke width')} token={{ spec: strokeSpec('width', 'Stroke width'), ctx }} />
+            <Field className="dp-w64" label="Stroke weight" icon="minus" title="Stroke weight" state={width} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled || !has} onCommit={(v) => ctx.run((ts) => setStroke(ts, { width: v }), 'Change stroke width')} token={{ spec: strokeSpec('width', 'Stroke weight'), ctx }} />
+            {/* Sides adalah multi-pilih: menu tetap terbuka sesudah memilih agar beberapa sisi bisa digabung. */}
             <MenuButton
               icon="square"
               title="Stroke sides"
+              closeOnPick={false}
               disabled={ctx.disabled || !has || vector}
               items={() =>
                 SIDES.map((s) => ({
@@ -1748,17 +1821,20 @@ function StrokeGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
                 }))
               }
             />
-            <button
-              type="button"
-              className={`dp-icon-btn boxed${adv ? ' filled' : ''}`}
-              title={vector ? 'Stroke settings' : 'Stroke settings (paths only)'}
-              aria-label="Stroke settings"
-              aria-expanded={adv}
-              disabled={ctx.disabled || !has || !vector}
-              onClick={() => setAdv((a) => !a)}
-            >
-              <Icon name="settings2" size={13} />
-            </button>
+            {/* Settings hanya untuk path (E3): disembunyikan pada non-vektor, bukan disabled permanen. */}
+            {vector && (
+              <button
+                type="button"
+                className={`dp-icon-btn boxed${adv ? ' active' : ''}`}
+                title="Stroke settings"
+                aria-label="Stroke settings"
+                aria-expanded={adv}
+                disabled={ctx.disabled || !has}
+                onClick={() => setAdv((a) => !a)}
+              >
+                <Icon name="settings2" size={13} />
+              </button>
+            )}
           </div>
           {vector && adv && <StrokeAdvanced targets={targets} ctx={ctx} disabled={ctx.disabled || !has} />}
         </>
@@ -1839,9 +1915,25 @@ function AppearanceGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }
     return { mixed: false, value: s, resolved: r };
   };
   const CORNER_ICON: readonly IconName[] = ['arrowUpLeft', 'arrowUpRight', 'arrowDownRight', 'arrowDownLeft'];
+  // Toggle independent corners: tombol 28×28 di ujung baris (desain E4) — saudara field, bukan `trailing`
+  // (tombol token absolut di dalam field menutupi klik — temuan review #2).
+  const cornerToggle = canRadius && (
+    <button
+      type="button"
+      className={`dp-icon-btn boxed${corners ? ' active' : ''}`}
+      title="Independent corners"
+      aria-label="Independent corners"
+      aria-pressed={corners}
+      disabled={ctx.disabled}
+      onClick={() => setCorners((c) => !c)}
+    >
+      <Icon name="scan" size={13} />
+    </button>
+  );
   return (
     <Group
       title="Appearance"
+      summary={blendText}
       action={
         <MenuButton
           icon="droplet"
@@ -1858,49 +1950,46 @@ function AppearanceGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }
         />
       }
     >
-      <div className="dp-row">
-        <Field
-          label="Opacity"
-          className="dp-grow"
-          state={readField(targets, (n) => n.opacity ?? 1)}
-          format={(v) => (typeof v === 'number' ? formatPercent(v) : '')}
-          parse={parsePercent}
-          scrub={{ step: 0.01, min: 0, max: 1 }}
-          disabled={ctx.disabled}
-          onCommit={(v) => ctx.run((ts) => setProp(ts, 'opacity', v), 'Change opacity')}
-        />
-        {canRadius && (
+      {/* Mode corners mengganti baris Opacity+Radius di tempat dengan grid 2×2 (desain E4). */}
+      {canRadius && corners ? (
+        <div className="dp-row">
+          <div className="dp-corners">
+            {CORNERS.map((c, i) => (
+              <Field key={c} label={`${c} corner radius`} title={`${c} corner radius`} icon={CORNER_ICON[i]} state={corner(i)} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setRadiusCorner(ts, i, v), 'Change corner radius')} token={{ spec: radiusSpec(i, `${c} radius`), ctx }} />
+            ))}
+          </div>
+          {cornerToggle}
+        </div>
+      ) : (
+        <div className="dp-row">
           <Field
-            label="Radius"
+            label="Opacity"
+            icon="blend"
+            title="Opacity"
             className="dp-grow"
-            state={allState}
-            format={num}
-            parse={parseSize}
-            scrub={{ step: 1, min: 0 }}
+            state={readField(targets, (n) => n.opacity ?? 1)}
+            format={(v) => (typeof v === 'number' ? formatPercent(v) : '')}
+            parse={parsePercent}
+            scrub={{ step: 0.01, min: 0, max: 1 }}
             disabled={ctx.disabled}
-            onCommit={(v) => ctx.run((ts) => setRadiusAll(ts, v), 'Change radius')}
-            token={{ spec: radiusSpec(), ctx }}
-            trailing={
-              <button
-                type="button"
-                className={`dp-icon-btn boxed${corners ? ' filled' : ''}`}
-                title="Independent corners"
-                aria-label="Independent corners"
-                aria-pressed={corners}
-                disabled={ctx.disabled}
-                onClick={() => setCorners((c) => !c)}
-              >
-                <Icon name="scan" size={13} />
-              </button>
-            }
+            onCommit={(v) => ctx.run((ts) => setProp(ts, 'opacity', v), 'Change opacity')}
           />
-        )}
-      </div>
-      {canRadius && corners && (
-        <div className="dp-row dp-corners">
-          {CORNERS.map((c, i) => (
-            <Field key={c} label={`${c} corner radius`} title={`${c} corner radius`} icon={CORNER_ICON[i]} state={corner(i)} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setRadiusCorner(ts, i, v), 'Change corner radius')} token={{ spec: radiusSpec(i, `${c} radius`), ctx }} />
-          ))}
+          {canRadius && (
+            <Field
+              label="Radius"
+              icon="squareRoundCorner"
+              title="Radius"
+              className="dp-grow"
+              state={allState}
+              format={num}
+              parse={parseSize}
+              scrub={{ step: 1, min: 0 }}
+              disabled={ctx.disabled}
+              onCommit={(v) => ctx.run((ts) => setRadiusAll(ts, v), 'Change radius')}
+              token={{ spec: radiusSpec(), ctx }}
+            />
+          )}
+          {cornerToggle}
         </div>
       )}
     </Group>
@@ -1925,10 +2014,11 @@ function EffectsGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
   const used = new Set<EffectKind>();
   for (const t of targets) for (const k of effectKindsOf(t.stored)) used.add(k);
   const [open, setOpen] = useState<string | undefined>(undefined);
+  // Baris "Mixed" tetap digambar saat nilai skalar beda antar target (E2): tanpa itu nilai tak terlihat/dihapus.
   const rows: { key: string; kind: EffectKind; index: number }[] = [
     ...list.map((s, i) => ({ key: `s${i}`, kind: (s.type === 'inner' ? 'inner' : 'drop') as EffectKind, index: i })),
-    ...(!blurState.mixed && typeof blurState.value === 'number' && blurState.value !== 0 ? [{ key: 'blur', kind: 'blur' as EffectKind, index: -1 }] : []),
-    ...(!backState.mixed && typeof backState.value === 'number' && backState.value !== 0 ? [{ key: 'bd', kind: 'backdropBlur' as EffectKind, index: -1 }] : []),
+    ...(blurState.mixed || (typeof blurState.value === 'number' && blurState.value !== 0) ? [{ key: 'blur', kind: 'blur' as EffectKind, index: -1 }] : []),
+    ...(backState.mixed || (typeof backState.value === 'number' && backState.value !== 0) ? [{ key: 'bd', kind: 'backdropBlur' as EffectKind, index: -1 }] : []),
   ];
   /** Editor sebaris satu baris: X/Y/Blur + warna untuk shadow; kolom Blur untuk blur skalar. */
   const editor = (row: (typeof rows)[number]) =>
@@ -1970,14 +2060,15 @@ function EffectsGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
       }
     >
       {shadows.mixed && <PaintRow disabled={ctx.disabled} swatch={<Swatch background="transparent" title="Mixed" disabled />} value={<span className="dp-muted">Mixed shadows</span>} onRemove={() => ctx.run((ts) => setProp(ts, 'shadows', null), 'Remove shadows')} removeTitle="Remove shadows" />}
-      {rows.map((row) => {
+      {rows.map((row, ri) => {
         const isOpen = open === row.key;
+        const scalar = SCALAR_KIND.has(row.kind) ? (row.kind === 'blur' ? blurState : backState) : undefined;
         return (
           <div key={row.key} className="dp-fx">
             <div className="dp-fx-row">
               <button
                 type="button"
-                className={`dp-icon-btn boxed${isOpen ? ' filled' : ''}`}
+                className={`dp-icon-btn boxed${isOpen ? ' active' : ''}`}
                 title={`${EFFECT_LABEL[row.kind]} settings`}
                 aria-label={`${EFFECT_LABEL[row.kind]} settings`}
                 aria-expanded={isOpen}
@@ -1988,7 +2079,7 @@ function EffectsGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
               </button>
               <label className="dp-select dp-grow">
                 <select
-                  aria-label="Effect type"
+                  aria-label={`Effect type ${ri + 1}`}
                   value={row.kind}
                   disabled={ctx.disabled}
                   onChange={(e) => ctx.run((ts) => convertEffect(ts, row.index >= 0 ? { index: row.index } : (row.kind as 'blur' | 'backdropBlur'), e.currentTarget.value as EffectKind), 'Change effect type')}
@@ -1999,6 +2090,8 @@ function EffectsGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
                     </option>
                   ))}
                 </select>
+                {/* Petunjuk nilai skalar di select (desain E3: "8"/"24" sebelum chevron); Mixed saat nilai beda. */}
+                {scalar && <span className="dp-select-hint">{scalar.mixed ? 'Mixed' : num(scalar.value)}</span>}
                 <Icon name="chevronDown" size={12} className="dp-select-chevron" />
               </label>
               <button
@@ -2333,7 +2426,7 @@ export function DesignPanel({ targets, path, editable, fonts, inspectNode, rev, 
           {comp?.kind === 'master' && comp.model && componentEdit && <MasterComponentGroup model={comp.model} edit={componentEdit} disabled={!editable} />}
           {comp?.kind === 'slotFrame' && componentEdit && <SlotFrameGroup {...comp} edit={componentEdit} disabled={!editable} />}
           {points && <PointGroup edit={points} disabled={!editable} />}
-          {groups.includes('position') && !points && <PositionGroup targets={targets} ctx={ctx} bounds={bounds} align={align} />}
+          {groups.includes('position') && !points && <PositionGroup targets={targets} ctx={ctx} bounds={bounds} align={align} dims={!groups.includes('autoLayout')} />}
           {groups.includes('autoLayout') && <AutoLayoutGroup targets={targets} ctx={ctx} />}
           {groups.includes('typography') && <TypographyGroup targets={targets} ctx={ctx} fonts={fonts} />}
           {groups.includes('icon') && <IconGroup targets={targets} ctx={ctx} />}

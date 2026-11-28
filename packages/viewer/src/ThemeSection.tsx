@@ -443,7 +443,12 @@ export function ThemeSection({
                 ))}
               </div>
             ) : (
-              <select className="input select dp-grow" aria-label="Board theme" value={boardMode ?? ''} disabled={!editable} onChange={(e) => boardTheme.onPick(e.currentTarget.value)}>
+              <select className="input select dp-grow" aria-label="Board theme" value={boardMode ?? '__mixed'} disabled={!editable} onChange={(e) => boardTheme.onPick(e.currentTarget.value)}>
+                {boardMode === undefined && (
+                  <option value="__mixed" disabled>
+                    Mixed
+                  </option>
+                )}
                 {boardTheme.modes.map((m) => (
                   <option key={m} value={m}>
                     {modeLabel(m)}

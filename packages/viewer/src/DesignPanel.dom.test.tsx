@@ -57,14 +57,19 @@ describe('DesignPanel — struktur seksi (spec-design-panel-figma)', () => {
     screen.getByRole('button', { name: 'Align left' });
     screen.getByRole('button', { name: 'Distribute horizontally' });
     screen.getByRole('button', { name: 'More alignment actions' });
-    screen.getByRole('button', { name: 'Width sizing' });
+    screen.getByRole('button', { name: /Width sizing/ });
     fireEvent.click(screen.getByRole('button', { name: 'Align left' }));
     expect(run).toHaveBeenCalledWith('align-left');
   });
 
+  it('chip sizing: nama aksesibel memuat teks terlihat ("Width sizing: Fixed")', () => {
+    panel([t('a', { width: 100 })]);
+    screen.getByRole('button', { name: 'Width sizing: Fixed' });
+  });
+
   it('chip sizing: menu Fixed/Hug/Fill dengan item aktif; pilih Fill → {width:"fill"}', async () => {
     const onCommit = panel([t('a', { width: 100 })]);
-    fireEvent.click(screen.getByRole('button', { name: 'Width sizing' }));
+    fireEvent.click(screen.getByRole('button', { name: /Width sizing/ }));
     const fill = await screen.findByRole('menuitemradio', { name: 'Fill' });
     expect((fill as HTMLElement).getAttribute('aria-checked')).toBe('false');
     fireEvent.click(fill);
@@ -73,11 +78,20 @@ describe('DesignPanel — struktur seksi (spec-design-panel-figma)', () => {
 
   it('board: field W tanpa chip (lebar selalu angka), chip H hanya Fixed/Hug', async () => {
     panel([t('a', { width: 1440, height: 800 }, { type: 'board' })], true);
-    expect(screen.queryByRole('button', { name: 'Width sizing' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Height sizing' }));
+    expect(screen.queryByRole('button', { name: /Width sizing/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Height sizing/ }));
     await screen.findByRole('menuitemradio', { name: 'Fixed' });
     await screen.findByRole('menuitemradio', { name: 'Hug' });
     expect(screen.queryByRole('menuitemradio', { name: 'Fill' })).toBeNull();
+  });
+
+  it('frame: W/H di dalam seksi Auto layout sesudah baris arah (desain badge 2)', () => {
+    panel([t('a', { layout: 'row', width: 100, height: 50 })]);
+    const position = screen.getByText('Position').closest('section')!;
+    expect(within(position).queryByLabelText('W')).toBeNull();
+    const autoLayout = screen.getByText('Auto layout').closest('section')!;
+    expect((within(autoLayout).getByLabelText('W') as HTMLInputElement).value).toBe('100');
+    expect((within(autoLayout).getByLabelText('H') as HTMLInputElement).value).toBe('50');
   });
 });
 
@@ -123,10 +137,40 @@ describe('DesignPanel — Auto layout', () => {
     await waitFor(() => expect(onCommit).toHaveBeenCalledWith([{ op: 'update', id: 'a', patch: { align: 'stretch' } }], 'Change align'));
   });
 
+  it('Stretch off mengembalikan align terakhir (Figma), bukan selalu start', async () => {
+    const onCommit = vi.fn(async (_ops: DocOp[], _label: string) => true);
+    const props = { path: ['Board', 'Frame'], editable: true, fonts: [], inspectNode: undefined, rev: 1, onCommit, doc: DOC, slug: 'doc' };
+    const ui = renderUi(<DesignPanel targets={[t('a', { layout: 'column', align: 'center' })]} {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Stretch' }));
+    await waitFor(() => expect(onCommit).toHaveBeenCalledWith([{ op: 'update', id: 'a', patch: { align: 'stretch' } }], 'Change align'));
+    // Dokumen memperbarui target → align stretch (rev naik agar antrean commit jalan); align lama tetap diingat.
+    ui.rerender(<DesignPanel targets={[t('a', { layout: 'column', align: 'stretch' })]} {...props} rev={2} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Stretch' }));
+    await waitFor(() => expect(onCommit).toHaveBeenCalledWith([{ op: 'update', id: 'a', patch: { align: 'center' } }], 'Change align'));
+  });
+
   it('grid alignment 3×3: klik sel menulis align+justify dalam satu commit', async () => {
     const onCommit = panel([t('a', { layout: 'row' })]);
     fireEvent.click(screen.getByRole('button', { name: 'Align center, justify center' }));
     await waitFor(() => expect(onCommit).toHaveBeenCalledWith([{ op: 'update', id: 'a', patch: { align: 'center', justify: 'center' } }], 'Change alignment'));
+  });
+
+  it('grid arah column: baris sel = justify (sumbu utama vertikal), kolom sel = align', async () => {
+    const onCommit = panel([t('a', { layout: 'column' })]);
+    // Sel kiri-bawah pada layout kolom: justify end + align start (temuan review HIGH #1).
+    fireEvent.click(screen.getByRole('button', { name: 'Align start, justify end' }));
+    await waitFor(() => expect(onCommit).toHaveBeenCalledWith([{ op: 'update', id: 'a', patch: { align: 'start', justify: 'end' } }], 'Change alignment'));
+  });
+
+  it('grid arah column: sel aktif mengikuti justify (sumbu utama vertikal)', () => {
+    panel([t('a', { layout: 'column', justify: 'end', align: 'center' })]);
+    expect(screen.getByRole('button', { name: 'Align center, justify end' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('grid: justify space-between dipertahankan — hanya sumbu silang yang ditulis (temuan review)', async () => {
+    const onCommit = panel([t('a', { layout: 'row', justify: 'space-between' })]);
+    fireEvent.click(screen.getByRole('button', { name: 'Align end, justify center' }));
+    await waitFor(() => expect(onCommit).toHaveBeenCalledWith([{ op: 'update', id: 'a', patch: { align: 'end' } }], 'Change alignment'));
   });
 
   it('Row gap: nonaktif tanpa wrap ("wrap only"); dengan wrap meng-commit rowGap', async () => {
@@ -200,26 +244,32 @@ describe('DesignPanel — Appearance', () => {
 describe('DesignPanel — Stroke', () => {
   const stroke = { color: '#000000', width: 1, align: 'inside' };
 
-  it('select posisi Inside/Center/Outside; tombol sides menu; settings nonaktif pada non-vektor', async () => {
+  it('select posisi Inside/Center/Outside; tombol sides menu; settings disembunyikan pada non-vektor', async () => {
     panel([t('a', { stroke })]);
     const pos = screen.getByLabelText('Stroke position') as HTMLSelectElement;
     expect(pos.value).toBe('inside');
-    const settings = screen.getByRole('button', { name: 'Stroke settings' }) as HTMLButtonElement;
-    expect(settings.disabled).toBe(true);
+    // Non-vektor: blok lanjutan tidak relevan — tombol settings tidak digambar (temuan review).
+    expect(screen.queryByRole('button', { name: 'Stroke settings' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Stroke sides' }));
     for (const s of ['Top', 'Right', 'Bottom', 'Left']) await screen.findByRole('menuitemradio', { name: s });
   });
 
-  it('path: settings membuka blok Cap/Join/Dash/Miter + strip pratinjau dash (E3)', () => {
+  it('path: blok lanjutan terbuka sendiri pada nilai non-default (E3): Cap/Join/Dash/Miter + strip dash', () => {
     panel([t('p', { stroke, strokeLinecap: 'round', strokeLinejoin: 'round', strokeDasharray: [4, 2], strokeMiterlimit: 4 }, { type: 'path' })]);
     const settings = screen.getByRole('button', { name: 'Stroke settings' }) as HTMLButtonElement;
-    expect(settings.disabled).toBe(false);
-    fireEvent.click(settings);
+    expect(settings.getAttribute('aria-expanded')).toBe('true');
     screen.getByLabelText('Cap');
     screen.getByLabelText('Join');
     expect((screen.getByLabelText('Dash') as HTMLInputElement).value).toBe('4 2');
     screen.getByLabelText('Miter');
     expect(document.querySelector('svg.dp-dashline line')?.getAttribute('stroke-dasharray')).toBe('4 2');
+  });
+
+  it('path default: blok lanjutan tertutup; klik settings membukanya', () => {
+    panel([t('p', { stroke }, { type: 'path' })]);
+    expect(screen.queryByLabelText('Cap')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Stroke settings' }));
+    screen.getByLabelText('Cap');
   });
 });
 
@@ -229,10 +279,13 @@ describe('DesignPanel — Fill & Effects', () => {
     expect(document.querySelectorAll('.dp-paint .dp-grip')).toHaveLength(2);
   });
 
-  it('seleksi fill campuran: swatch bergaris + "Mixed fills" (E2)', () => {
-    panel([t('a', { fills: [{ type: 'solid', color: '#FF0000' }] }), t('b', { fills: [{ type: 'solid', color: '#0000FF' }] })]);
-    screen.getByText('Mixed fills');
+  it('seleksi fill campuran: swatch bergaris + input hex "Mixed fills" (E2); satu hex meng-unify semua', async () => {
+    const onCommit = panel([t('a', { fills: [{ type: 'solid', color: '#FF0000' }] }), t('b', { fills: [{ type: 'solid', color: '#0000FF' }] })]);
     expect(document.querySelector('.dp-swatch-mixed')).not.toBeNull();
+    const hex = screen.getByPlaceholderText('Mixed fills');
+    fireEvent.change(hex, { target: { value: '#112233' } });
+    fireEvent.blur(hex);
+    await waitFor(() => expect(onCommit).toHaveBeenCalledWith([{ op: 'update', id: 'a', patch: { fills: [{ type: 'solid', color: '#112233' }] } }, { op: 'update', id: 'b', patch: { fills: [{ type: 'solid', color: '#112233' }] } }], 'Change fill on 2 layers'));
   });
 
   it('menu "+" Effects menawarkan 4 jenis; Layer blur menulis {blur:8}; jenis skalar terpakai dinonaktifkan', async () => {
@@ -248,7 +301,7 @@ describe('DesignPanel — Fill & Effects', () => {
 
   it('baris efek bertipe: select jenis mengubah tipe shadow di tempat', async () => {
     const onCommit = panel([t('a', { shadows: [{ type: 'drop', x: 0, y: 4, blur: 12, color: '#00000033' }] })]);
-    const select = screen.getByLabelText('Effect type') as HTMLSelectElement;
+    const select = screen.getByLabelText('Effect type 1') as HTMLSelectElement;
     expect(select.value).toBe('drop');
     fireEvent.change(select, { target: { value: 'inner' } });
     await waitFor(() => expect(onCommit).toHaveBeenCalledWith([{ op: 'update', id: 'a', patch: { shadows: [{ type: 'inner', x: 0, y: 4, blur: 12, color: '#00000033' }] } }], 'Change effect type'));
@@ -267,12 +320,35 @@ describe('DesignPanel — Fill & Effects', () => {
     screen.getByLabelText('Blur');
   });
 
-  it('baris blur skalar: select jenis + settings membuka field Blur', () => {
+  it('baris blur skalar: select jenis + petunjuk nilai + settings membuka field Blur', () => {
     panel([t('a', { blur: 6 })]);
-    const select = screen.getByLabelText('Effect type') as HTMLSelectElement;
+    const select = screen.getByLabelText('Effect type 1') as HTMLSelectElement;
     expect(select.value).toBe('blur');
+    expect(select.closest('.dp-select')?.querySelector('.dp-select-hint')?.textContent).toBe('6');
     fireEvent.click(screen.getByRole('button', { name: 'Layer blur settings' }));
     expect((screen.getByLabelText('Blur') as HTMLInputElement).value).toBe('6');
+  });
+
+  it('blur campuran antar target: baris "Mixed" tampil dan bisa dihapus (temuan review)', async () => {
+    const onCommit = panel([t('a', { blur: 4 }), t('b', { blur: 8 })]);
+    const select = screen.getByLabelText('Effect type 1') as HTMLSelectElement;
+    expect(select.value).toBe('blur');
+    expect(select.closest('.dp-select')?.querySelector('.dp-select-hint')?.textContent).toBe('Mixed');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove layer blur' }));
+    await waitFor(() => expect(onCommit).toHaveBeenCalledWith([{ op: 'update', id: 'a', patch: { blur: null } }, { op: 'update', id: 'b', patch: { blur: null } }], 'Remove layer blur on 2 layers'));
+  });
+
+  it('menu efek menutup setelah memilih (temuan review): "Drop shadow" sekali tambah', async () => {
+    const onCommit = panel([t('a', {})]);
+    fireEvent.click(screen.getByRole('button', { name: 'Add effect' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Drop shadow' }));
+    await waitFor(() => expect(onCommit).toHaveBeenCalledWith([{ op: 'update', id: 'a', patch: { shadows: [{ type: 'drop', x: 0, y: 4, blur: 12, color: '#00000033' }] } }], 'Add drop shadow'));
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('opacity fill solid: kotak opacity menampilkan angka polos tanpa "%%" (temuan review)', () => {
+    panel([t('a', { fills: [{ type: 'solid', color: '#FF0000' }] })]);
+    expect((screen.getByLabelText('Fill opacity') as HTMLInputElement).value).toBe('100');
   });
 });
 

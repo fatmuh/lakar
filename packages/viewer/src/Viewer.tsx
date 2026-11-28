@@ -2135,7 +2135,7 @@ export function Viewer({ slug }: { slug: string }) {
               componentEdit={componentEdit}
               pathEdit={pathEdit}
               onExportCode={preview ? undefined : openCodeExport}
-              align={designTargets.length > 1 ? { enabled: editable ? actionState(sceneRef.current?.() ?? [], selection) : NO_ACTIONS, run: (a) => runAction(a) } : undefined}
+              align={designTargets.length > 0 ? { enabled: editable ? actionState(sceneRef.current?.() ?? [], selection) : NO_ACTIONS, run: (a) => runAction(a) } : undefined}
               slug={slug}
               doc={latestDoc}
               exportSel={exportSel}

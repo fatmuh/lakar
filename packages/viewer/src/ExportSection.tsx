@@ -224,7 +224,7 @@ export function CodeSection({ sel, onExportCode }: { sel: ExportSel | undefined;
           <Icon name="chevronDown" size={12} className="dp-select-chevron" />
         </label>
         <button type="button" className="btn code-export-btn" disabled={!sel} title={!sel ? 'Select a layer to export code' : undefined} onClick={() => sel && onExportCode(sel.nodeId, target)}>
-          Export…
+          <Icon name="code" size={13} /> Export…
         </button>
       </div>
     </section>

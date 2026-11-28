@@ -2512,22 +2512,13 @@ button.panel-tab:hover {
 .edit-submenu {
   z-index: 1;
 }
-/* Desain "Align & distribute" (J8r8Gq): 8 tombol ikon tinggi 28 berbagi lebar, jarak 6. */
-.dp-row.dp-align-row {
-  gap: 6px;
-}
-.dp-row.dp-align-row > .dp-icon-btn {
-  flex: 1 1 0;
-  width: auto;
-  min-width: 0;
-}
-/* Panel Design sebagai query container (desain E5 "shrink, don't scroll" di 240px):
+/* Panel Design sebagai query container (desain E5 "shrink, don't scroll" di bawah 280px):
    - ikon distribute pindah ke menu "···",
    - baris Folder/Name & Code bertumpuk vertikal. */
 .design-panel {
   container-type: inline-size;
 }
-@container (max-width: 264px) {
+@container (max-width: 280px) {
   .dp-align-bar .dp-align-dist {
     display: none;
   }
@@ -2541,8 +2532,9 @@ button.panel-tab:hover {
     gap: 4px;
   }
 }
-/* E6 read-only: semua kontrol panel diredupkan (interaksi sudah dimatikan per kontrol). */
-.design-panel.readonly > :not(.selection-header):not(.read-only-note) {
+/* E6 read-only: grup seksi Design diredupkan (interaksi sudah dimatikan per kontrol); header seleksi,
+   catatan read-only, Code/Export/Theme yang tetap bisa dipakai tidak ikut redup. */
+.design-panel.readonly .dp-group:not(.code-section) {
   opacity: 0.6;
 }
 .edit-ghost-slot {
@@ -3038,9 +3030,9 @@ button.panel-tab:hover {
 .dp-auto-grid {
   align-items: stretch;
 }
-/* Baris 4 field → grid 2×2 (padding Independent T/R/B/L, sudut radius — desain E4). */
-.dp-row.dp-pad4,
-.dp-row.dp-corners {
+/* Grid 2×2 di dalam baris (padding Independent T/R/B/L, sudut radius — desain E4); toggle 28×28 di ujung baris. */
+.dp-pad4,
+.dp-corners {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
@@ -3119,6 +3111,14 @@ button.panel-tab:hover {
   position: absolute;
   right: 8px;
   color: var(--text-secondary);
+  pointer-events: none;
+}
+/* Petunjuk nilai di dalam select efek (desain E3: "8"/"24" sebelum chevron). */
+.dp-select-hint {
+  flex: none;
+  margin-right: 14px;
+  color: var(--text-muted);
+  font-size: 10px;
   pointer-events: none;
 }
 .dp-token {
@@ -3660,14 +3660,10 @@ button.panel-tab:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
 }
+/* State aktif toggle (wrap, stretch, independent padding/corners, settings terbuka): aksen lembut sesuai desain. */
 .dp-icon-btn.active {
   background: var(--accent-soft);
   color: var(--accent);
-}
-/* State "tertekan" netral untuk toggle tanpa aksi aksen (wrap, stretch, independent corners). */
-.dp-icon-btn.filled {
-  background: var(--surface-hover);
-  color: var(--text-primary);
 }
 .dp-icon-btn:disabled {
   cursor: default;
