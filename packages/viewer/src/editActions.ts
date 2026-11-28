@@ -623,7 +623,8 @@ export function viewShortcut(e: ShortcutKey): { view: ViewKey; tab?: number } | 
   }
   if (e.altKey && !mod && !e.shiftKey && e.code.startsWith('Digit')) {
     const n = Number(e.code.slice(5));
-    if (n >= 1 && n <= 4) return { view: 'tab', tab: n - 1 };
+    // Paritas Figma: ⌥1/2/3 = tab sidebar kiri (Layers/Assets/Comments di Lakar).
+    if (n >= 1 && n <= 3) return { view: 'tab', tab: n - 1 };
   }
   return undefined;
 }

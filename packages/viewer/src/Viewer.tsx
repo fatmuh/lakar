@@ -1452,7 +1452,12 @@ export function Viewer({ slug }: { slug: string }) {
       const v = viewShortcut(e);
       if (!v) return;
       e.preventDefault();
-      if (v.view === 'tab') setTab(TABS[v.tab ?? 0]?.id ?? 'activity');
+      if (v.view === 'tab') {
+        setLeftTab((['layers', 'assets', 'comments'] as const)[v.tab ?? 0] ?? 'layers');
+        // Sidebar kiri terlipat/drawer tertutup → buka dulu supaya tab terlihat (paritas Figma ⌥1/2/3).
+        if (sidebars.collapsed.left) toggleSidebar('left', true);
+        setLayersOpen(true);
+      }
       else if (v.view === 'toggle-proto') setTab((t) => (t === 'prototype' ? 'design' : 'prototype'));
       else if (v.view === 'comments') setCommentsHidden((h) => !h);
       else if (v.view === 'cursors') setCursorsHidden((h) => !h);
@@ -1463,7 +1468,7 @@ export function Viewer({ slug }: { slug: string }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [slug]);
+  }, [slug, sidebars.collapsed.left, toggleSidebar, cycleFocusRegion]);
   /** Menu konteks aksi (canvas live / baris Layers) dengan seleksi saat dibuka. */
   const [editMenu, setEditMenu] = useState<{ x: number; y: number; ids: string[] } | undefined>(undefined);
   const openLayerMenu = useCallback((id: string, x: number, y: number) => {

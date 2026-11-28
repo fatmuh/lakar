@@ -21,7 +21,7 @@ async function openViewer() {
 }
 
 const key = (k: string, o: Partial<KeyboardEventInit> = {}) => fireEvent.keyDown(window, { key: k, ...o });
-const selectedTab = () => document.querySelector('.panel-body')?.closest('[class]') && [...document.querySelectorAll<HTMLElement>('.panel-tab.tab-activity, .panel-tab.tab-design, .panel-tab.tab-prototype, .panel-tab.tab-history')].find((t) => t.getAttribute('aria-selected') === 'true')?.textContent;
+const selectedLeftTab = () => [...document.querySelectorAll<HTMLElement>('.layers-panel [role="tab"]')].find((t) => t.getAttribute('aria-selected') === 'true')?.textContent;
 
 describe('Viewer — shortcut paritas Figma (tampilan)', () => {
   it('Ctrl/⌘+Shift+? membuka panel shortcut; Esc menutup', async () => {
@@ -34,17 +34,23 @@ describe('Viewer — shortcut paritas Figma (tampilan)', () => {
     await waitFor(() => expect(document.querySelector('.modal.shortcuts')).toBeNull());
   });
 
-  it('Alt+1..4 memilih tab panel kanan; Shift+E bolak-balik Design↔Prototype', async () => {
+  it('Alt+1..3 memilih tab sidebar kiri (paritas Figma); Shift+E bolak-balik Design↔Prototype', async () => {
     await openViewer();
-    expect(selectedTab()).toBe('Activity');
+    expect(selectedLeftTab()).toBe('Layers');
     key('2', { code: 'Digit2', altKey: true });
-    await waitFor(() => expect(selectedTab()).toBe('Design'));
-    key('4', { code: 'Digit4', altKey: true });
-    await waitFor(() => expect(selectedTab()).toBe('History'));
+    await waitFor(() => expect(selectedLeftTab()).toBe('Assets'));
+    key('3', { code: 'Digit3', altKey: true });
+    await waitFor(() => expect(selectedLeftTab()).toContain('Comments'));
+    key('1', { code: 'Digit1', altKey: true });
+    await waitFor(() => expect(selectedLeftTab()).toBe('Layers'));
+  });
+
+  it('Shift+E bolak-balik tab kanan Design↔Prototype', async () => {
+    await openViewer();
     key('E', { code: 'KeyE', shiftKey: true });
-    await waitFor(() => expect(selectedTab()).toBe('Prototype'));
+    await waitFor(() => expect(document.querySelector('.panel-tab.tab-prototype')?.getAttribute('aria-selected')).toBe('true'));
     key('E', { code: 'KeyE', shiftKey: true });
-    await waitFor(() => expect(selectedTab()).toBe('Design'));
+    await waitFor(() => expect(document.querySelector('.panel-tab.tab-design')?.getAttribute('aria-selected')).toBe('true'));
   });
 
   it('F6 menyikluskan fokus antar region (sidebar → canvas → panel)', async () => {

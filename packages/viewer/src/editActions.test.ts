@@ -450,7 +450,8 @@ describe('shortcut paritas Figma (spec-canvas-shortcuts)', () => {
   it('kunci tampilan: tab, proto, komentar, kursor, outline, panel, present, F6', () => {
     expect(v('E', { shiftKey: true, code: 'KeyE' })).toEqual({ view: 'toggle-proto' });
     expect(v('1', { altKey: true, code: 'Digit1' })).toEqual({ view: 'tab', tab: 0 });
-    expect(v('4', { altKey: true, code: 'Digit4' })).toEqual({ view: 'tab', tab: 3 });
+    expect(v('3', { altKey: true, code: 'Digit3' })).toEqual({ view: 'tab', tab: 2 });
+    expect(v('4', { altKey: true, code: 'Digit4' })).toBeUndefined();
     expect(v('C', { shiftKey: true, code: 'KeyC' })).toEqual({ view: 'comments' });
     expect(v('O', { shiftKey: true, code: 'KeyO' })).toEqual({ view: 'outline' });
     expect(v('\\', { ctrlKey: true, altKey: true, code: 'Backslash' })).toEqual({ view: 'cursors' });

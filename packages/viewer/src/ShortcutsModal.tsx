@@ -80,7 +80,7 @@ const GROUPS: { title: string; rows: readonly [string, string][] }[] = [
     rows: [
       [`${M}+ −`, 'Zoom'],
       [`${S}1 2 0`, 'Fit / selection / 100%'],
-      [`${A}1..${A}4`, 'Panel tabs'],
+      [`${A}1..${A}3`, 'Left panel tabs'],
       [`${S}E`, 'Design / Prototype tab'],
       [`${S}O`, 'Outline mode'],
       [`${S}C`, 'Show / hide comments'],
