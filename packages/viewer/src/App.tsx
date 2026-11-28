@@ -63,6 +63,9 @@ export function App() {
   if (bootRoute.current === undefined) bootRoute.current = route.name;
   const [authStatus, setAuthStatus] = useState<AuthStatus | undefined>(undefined);
   const [gateDone, setGateDone] = useState<GateDoneReason | undefined>(undefined);
+  /** Sign-out eksplisit (event `auth` signedIn:false tanpa reason 'expired') — gate dipaksa tampil meski
+   * `onboarding.signin` sudah 'completed' permanen (spec: signout kembali ke onboarding, bukan tetap di app). */
+  const [signedOut, setSignedOut] = useState(false);
   const loadAuth = useCallback(() => {
     api.authStatus().then(
       (s) => {
@@ -74,7 +77,7 @@ export function App() {
   }, []);
   useEffect(loadAuth, [loadAuth]);
   // Gate tertutup hanya lewat sign-in (`gateDone` diset OnboardingGate) — tanpa jalur skip/offline.
-  const gate = gateDone === undefined && shouldShowGate(authStatus, bootRoute.current, false);
+  const gate = gateDone === undefined && (shouldShowGate(authStatus, bootRoute.current, false) || signedOut);
   const gateRef = useRef(gate);
   gateRef.current = gate;
   // Route `present` melaporkan slug-nya juga: fokus agen (`open_doc` tanpa slug) tetap menunjuk dokumen yang dipresentasikan.
@@ -195,6 +198,11 @@ export function App() {
               }
             }
             if (e.auth.signedIn) sessionExpired.clear();
+            // Sign-out eksplisit (reason lain: 'expired' tetap toast saja, E4) → buka gate onboarding lagi.
+            if (e.auth.signedIn === false && e.auth.reason !== 'expired') {
+              setGateDone(undefined);
+              setSignedOut(true);
+            }
             loadAuth();
           } else if (remoteDocCall(e, api.origin)) api.notifyDocsChanged();
         },
