@@ -44,7 +44,9 @@ class WB {
 }
 
 // Schema mini bergaya Figma: Message{nodeChanges:[NodeChange]} + tipe pendukung.
-const DEFS = [
+type DefField = { name: string; type?: string; value?: number; isArray?: boolean };
+type Def = { name: string; kind: number; fields: DefField[] };
+const DEFS: Def[] = [
   { name: 'GUID', kind: 1, fields: [{ name: 'sessionID', type: 'uint' }, { name: 'localID', type: 'uint' }] },
   { name: 'NodeType', kind: 0, fields: [{ name: 'FRAME', value: 1 }, { name: 'RECTANGLE', value: 2 }, { name: 'TEXT', value: 3 }, { name: 'ELLIPSE', value: 4 }] },
   { name: 'PaintType', kind: 0, fields: [{ name: 'SOLID', value: 1 }, { name: 'IMAGE', value: 2 }] },
