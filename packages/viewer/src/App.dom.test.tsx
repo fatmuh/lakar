@@ -115,6 +115,22 @@ describe('App — gate first-run sign-in', () => {
   });
 });
 
+describe('App — sign-out kembali ke gate (spec-signout-gate)', () => {
+  it('event auth signedIn:false (sign-out eksplisit) → gate onboarding tampil lagi; reason:expired tetap toast', async () => {
+    daemonAuth({ signedIn: true, configured: true, user: { id: 'u1', email: 'ana@studio.id' }, onboarding: { signin: 'completed' } });
+    location.hash = '#/';
+    renderUi(<App />);
+    stream.hello();
+    await waitFor(() => expect(document.querySelector('main.body')).not.toBeNull());
+    // Sign-out eksplisit → gate onboarding tampil walau onboarding.signin 'completed'.
+    daemonAuth({ signedIn: false, configured: true, providers: ['google', 'github', 'email'], onboarding: { signin: 'completed' } });
+    stream.event('auth', { auth: { signedIn: false } });
+    await waitFor(() => expect(document.querySelector('.onboarding')).not.toBeNull());
+    // Status terbaru (signed out) sampai ke gate.
+    await screen.findByRole('button', { name: 'Continue with Google' });
+  });
+});
+
 describe('App — session expired (E4)', () => {
   it('event auth reason:expired → satu toast dengan aksi Sign in; event berulang tidak menduplikasi', async () => {
     daemonAuth({ signedIn: true, configured: true, user: { id: 'u1', email: 'ana@studio.id' } });
