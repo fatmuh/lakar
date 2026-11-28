@@ -15,11 +15,12 @@ import { copyAs, type CopyFormat } from './copyas';
 import { ALIGN_ACTIONS, DISTRIBUTE_ACTIONS, type EditAction } from './editActions';
 import { ACTION_META, actionTitle } from './EditMenu';
 import {
+  addEffect,
   addFill,
-  addShadow,
   addStroke,
   axisGapOf,
   canEditXY,
+  convertEffect,
   convertFill,
   CORNERS,
   describeEdit,
@@ -27,6 +28,7 @@ import {
   editFill,
   editShadow,
   editStop,
+  effectKindsOf,
   enterGrid,
   fillRows,
   formatRowCount,
@@ -34,16 +36,22 @@ import {
   keepsToken,
   layoutOf,
   moveFill,
+  opsFor,
+  paddingAxisState,
+  paddingEdgeOf,
   parseColumnCount,
   parseRowCount,
+  RADIUS_TYPES,
   radiusAll,
   readField,
   readSizing,
+  removeEffect,
   removeFill,
-  removeShadow,
   removeStroke,
   setAllFills,
   setLayout,
+  setPaddingAxis,
+  setPaddingEdge,
   setProp,
   setRadiusAll,
   setRadiusCorner,
@@ -59,6 +67,7 @@ import {
   formatDash,
   isVectorSelection,
   MITER_MAX,
+  VECTOR_DEFAULTS,
   parseDash,
   parseMiter,
   setVector,
@@ -66,9 +75,11 @@ import {
   trackCount,
   type Axis,
   type DesignTarget,
+  type EffectKind,
   type Group as DesignGroup,
   type FieldState,
   type FillLike,
+  type PadAxis,
   type PaintKind,
   type Raw,
   type Side,
@@ -76,30 +87,29 @@ import {
 } from './designModel';
 import {
   formatNumber,
-  formatPadding,
   formatPercent,
-  formatShadow,
   changeColor,
   isTokenRef,
   parseHex,
   parseNumber,
-  parsePadding,
   parsePercent,
-  parseShadow,
   sameValue,
   splitHex,
   WEIGHT_NAMES,
 } from './designValues';
-import { ExportSection, type ExportSel } from './ExportSection';
-import { Menu } from './FileMenu';
+import { CodeSection, ExportSection, type ExportSel } from './ExportSection';
+import type { CodegenTarget } from './codeExport';
+import { Menu, type Item } from './FileMenu';
 import { ThemeSection } from './ThemeSection';
-import { cellOf, modeIcon, modeLabel, newTokenName, readThemeMode, themeModeOps, TYPE_META, type TokenMap } from './themeModel';
+import { cellOf, newTokenName, themeModeOps, TYPE_META, type TokenMap } from './themeModel';
 import {
   anyRef,
   applyTokenOps,
   createTokenOps,
   createValue,
   fillColorSpec,
+  paddingAxisSpec,
+  paddingEdgeSpec,
   propSpec,
   radiusSpec,
   stopColorSpec,
@@ -123,12 +133,6 @@ type Commit = (ops: DocOp[], description: string) => Promise<boolean>;
 const TYPE_LABEL: Record<string, string> = { board: 'Board', frame: 'Frame', text: 'Text', rect: 'Rectangle', ellipse: 'Ellipse', path: 'Path', icon: 'Icon' };
 // Copy as CSS/Tailwind per node digantikan dialog Export code (epic kode story 5); JSON tetap untuk debug.
 const COPY_FORMATS: readonly [CopyFormat, string][] = [['json', 'JSON']];
-const ALIGN_OPTIONS = [
-  ['start', 'Start'],
-  ['center', 'Center'],
-  ['end', 'End'],
-  ['stretch', 'Stretch'],
-] as const;
 const JUSTIFY_OPTIONS = [
   ['start', 'Start'],
   ['center', 'Center'],
@@ -252,18 +256,20 @@ function TokenParts({ name, spec, ctx, text, onEditValue }: { name: string; spec
   );
 }
 
-/** Token Field (zjtyn): ikon jenis menggantikan label (desain Gap/Radius), lalu pill, nilai, Detach. */
-function TokenField({ name, spec, ctx, text, className, onEditValue }: { name: string; spec: TokenSpec; ctx: Ctx; text: string; className?: string | undefined; onEditValue?: (() => void) | undefined }) {
+/** Token Field (zjtyn): ikon jenis menggantikan label (desain Gap/Radius), lalu pill, nilai, Detach. `lead`/`trailing` = elemen di tepi field (desain E1: label W + chip resize). */
+function TokenField({ name, spec, ctx, text, className, lead, trailing, onEditValue }: { name: string; spec: TokenSpec; ctx: Ctx; text: string; className?: string | undefined; lead?: ReactNode; trailing?: ReactNode; onEditValue?: (() => void) | undefined }) {
   const def = ctx.tokens[name];
   const open = ctx.pickerKey === specKey(spec);
   return (
     <div className={`dp-tokenfield${open ? ' open' : ''}${ctx.disabled ? ' disabled' : ''}${className ? ` ${className}` : ''}`} title={spec.label}>
+      {lead}
       {def?.type === 'color' ? (
         <i className="dp-tokenfield-swatch" style={{ background: swatchCss(cellOf(def, ctx.targets[0]?.mode, ctx.modes).value) }} />
       ) : (
         <Icon name={def ? TYPE_META[def.type].icon : 'diamond'} size={13} className="dp-tokenfield-icon" />
       )}
       <TokenParts name={name} spec={spec} ctx={ctx} text={text} onEditValue={onEditValue} />
+      {trailing}
     </div>
   );
 }
@@ -477,6 +483,8 @@ function TokenPicker({ anchor, trigger, spec, ctx, onClose }: { anchor: HTMLElem
 
 type FieldProps = {
   label: string;
+  /** Ikon 12px menggantikan label teks (mis. move-horizontal untuk Pad H); tetap target scrub. */
+  icon?: IconName | undefined;
   state: FieldState;
   /** Nilai tersimpan → teks kolom (bukan token). */
   format: (v: unknown, resolved: unknown) => string;
@@ -488,6 +496,12 @@ type FieldProps = {
   scrub?: { step: number; min?: number; max?: number; base?: number | undefined; toValue?: (n: number) => unknown } | undefined;
   /** Teks redup saat kosong (mis. ukuran terukur, "Auto"). */
   placeholder?: string | undefined;
+  /** Nama aksesibel bila berbeda dari teks lead (mis. lead "T" → "Top padding"). */
+  ariaLabel?: string | undefined;
+  /** Teks redup di ujung field (mis. "wrap only" pada Row gap). */
+  hint?: string | undefined;
+  /** Elemen di ujung field sesudah nilai (mis. chip resize Fixed/Hug/Fill pada W/H). */
+  trailing?: ReactNode;
   className?: string | undefined;
   title?: string | undefined;
   /** Slot token field (story 4): ref = Token Field, literal = tombol token. */
@@ -498,7 +512,7 @@ type FieldProps = {
  * Kolom angka/teks (komponen Field): Enter/blur commit, Escape batal, ref token = chip (klik → input berisi nilai
  * resolve; nilai sama = ref tetap). Scrub: drag horizontal pada label, pratinjau hanya di kolom, commit saat lepas.
  */
-function Field({ label, state, format, parse, onCommit, disabled, scrub, placeholder, className, title, token: slot }: FieldProps) {
+function Field({ label, icon, state, format, parse, onCommit, disabled, scrub, placeholder, ariaLabel, hint, trailing, className, title, token: slot }: FieldProps) {
   const [draft, setDraft] = useState<string | undefined>(undefined);
   const [scrubText, setScrubText] = useState<string | undefined>(undefined);
   const input = useRef<HTMLInputElement>(null);
@@ -561,28 +575,31 @@ function Field({ label, state, format, parse, onCommit, disabled, scrub, placeho
     target.addEventListener('pointercancel', onCancel);
     window.addEventListener('keydown', onKey, true);
   };
+  const lead = (
+    <span
+      className={`dp-field-label${scrub && !disabled ? ' scrub' : ''}`}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        startScrub(e);
+      }}
+    >
+      {icon ? <Icon name={icon} size={12} /> : label}
+    </span>
+  );
   if (token && slot && !tokenOpen && draft === undefined && scrubText === undefined) {
-    return <TokenField name={token} spec={slot.spec} ctx={slot.ctx} text={shown} className={className} onEditValue={() => setTokenOpen(true)} />;
+    return <TokenField name={token} spec={slot.spec} ctx={slot.ctx} text={shown} className={className} lead={lead} trailing={trailing} onEditValue={() => setTokenOpen(true)} />;
   }
   return (
     // div (bukan label): klik label untuk scrub tidak boleh memfokuskan input (draft lama akan tertahan).
     <div className={`dp-field${disabled ? ' disabled' : ''}${className ? ` ${className}` : ''}`} title={title}>
-      <span
-        className={`dp-field-label${scrub && !disabled ? ' scrub' : ''}`}
-        onPointerDown={(e) => {
-          e.preventDefault();
-          startScrub(e);
-        }}
-      >
-        {label}
-      </span>
+      {lead}
       {token && !tokenOpen && draft === undefined && scrubText === undefined ? (
         <TokenChip name={token} disabled={disabled} onClick={() => setTokenOpen(true)} />
       ) : (
         <input
           ref={input}
           className="dp-field-value"
-          aria-label={label}
+          aria-label={ariaLabel ?? label}
           value={scrubText ?? draft ?? shown}
           placeholder={state.mixed ? 'Mixed' : placeholder}
           disabled={disabled}
@@ -611,6 +628,8 @@ function Field({ label, state, format, parse, onCommit, disabled, scrub, placeho
           }}
         />
       )}
+      {hint !== undefined && <span className="dp-field-hint">{hint}</span>}
+      {trailing}
       {slot && !token && scrubText === undefined && <TokenButton spec={slot.spec} ctx={slot.ctx} disabled={disabled} />}
     </div>
   );
@@ -663,6 +682,7 @@ function Segmented<T extends string>({
 /** Select Field: label + nilai + chevron di atas `<select>` native. Mixed/token tampil sebagai opsi non-aktif. */
 function SelectField({
   label,
+  ariaLabel,
   state,
   options,
   onPick,
@@ -671,6 +691,8 @@ function SelectField({
   token: slot,
 }: {
   label?: string;
+  /** aria-label bila tanpa label teks tampak (dropdown polos, mis. posisi Stroke). */
+  ariaLabel?: string;
   state: FieldState;
   options: readonly (readonly [string, string])[];
   onPick: (v: string) => void;
@@ -689,7 +711,7 @@ function SelectField({
       <select
         value={cur}
         disabled={disabled}
-        aria-label={label}
+        aria-label={label ?? ariaLabel}
         onChange={(e) => {
           const v = e.currentTarget.value;
           if (!v.startsWith('__')) onPick(v);
@@ -723,8 +745,8 @@ function SelectField({
   );
 }
 
-/** Swatch: dengan `pick` membuka color picker native (commit sekali saat picker ditutup, event `change`). */
-function Swatch({ background, pick, onClick, disabled, title }: { background: string; pick?: ((hex: string) => void) | undefined; onClick?: (() => void) | undefined; disabled: boolean; title: string }) {
+/** Swatch: dengan `pick` membuka color picker native (commit sekali saat picker ditutup, event `change`). `mixed` = pola stripe (E2 "Mixed fills"). */
+function Swatch({ background, pick, onClick, disabled, title, mixed }: { background: string; pick?: ((hex: string) => void) | undefined; onClick?: (() => void) | undefined; disabled: boolean; title: string; mixed?: boolean }) {
   const ref = useRef<HTMLInputElement>(null);
   const pickRef = useRef(pick);
   pickRef.current = pick;
@@ -736,17 +758,18 @@ function Swatch({ background, pick, onClick, disabled, title }: { background: st
     el.addEventListener('change', onChange);
     return () => el.removeEventListener('change', onChange);
   }, [pick !== undefined, solid]);
+  const sw = mixed ? <i className="dp-swatch-mixed" /> : <i style={{ background }} />;
   if (pick) {
     return (
       <label className={`dp-swatch${disabled ? ' disabled' : ''}`} title={title}>
-        <i style={{ background }} />
+        {sw}
         <input ref={ref} type="color" defaultValue={solid} key={solid} disabled={disabled} aria-label={title} />
       </label>
     );
   }
   return (
     <button type="button" className="dp-swatch" title={title} aria-label={title} disabled={disabled} onClick={onClick}>
-      <i style={{ background }} />
+      {sw}
     </button>
   );
 }
@@ -775,16 +798,17 @@ function ColorValue({ stored, resolved, onHex, disabled, mixed, placeholder, lab
   );
 }
 
-/** Paint Row: kotak (swatch + nilai + opacity) + tombol hapus. */
-function PaintRow({ swatch, value, opacity, extra, onRemove, disabled, removeTitle, drag }: { swatch: ReactNode; value: ReactNode; opacity?: ReactNode; extra?: ReactNode; onRemove?: (() => void) | undefined; disabled: boolean; removeTitle?: string; drag?: DragProps | undefined }) {
+/** Paint Row (desain bagian 06): grip drag saat hover, kotak (swatch + nilai), kotak opacity 52px, tombol hapus. */
+function PaintRow({ swatch, value, opacity, extra, onRemove, disabled, removeTitle, drag, grip }: { swatch: ReactNode; value: ReactNode; opacity?: ReactNode; extra?: ReactNode; onRemove?: (() => void) | undefined; disabled: boolean; removeTitle?: string; drag?: DragProps | undefined; grip?: boolean }) {
   return (
     <div className={`dp-paint${drag?.over ? ' drop-over' : ''}`} {...(drag ? { draggable: !disabled, onDragStart: drag.onDragStart, onDragOver: drag.onDragOver, onDragLeave: drag.onDragLeave, onDrop: drag.onDrop, onDragEnd: drag.onDragEnd } : {})}>
+      {grip && <Icon name="gripVertical" size={12} className="dp-grip" />}
       <div className="dp-paint-box">
         {swatch}
         <div className="dp-paint-value">{value}</div>
-        {opacity !== undefined && <div className="dp-paint-opacity">{opacity}</div>}
         {extra}
       </div>
+      {opacity !== undefined && <div className="dp-paint-op">{opacity}<span className="dp-op-pct">%</span></div>}
       {onRemove && (
         <button type="button" className="dp-icon-btn" title={removeTitle ?? 'Remove'} aria-label={removeTitle ?? 'Remove'} disabled={disabled} onClick={onRemove}>
           <Icon name="minus" size={14} />
@@ -843,13 +867,13 @@ function InlineInput({ value, onCommit, disabled, placeholder, label, className,
 
 /** Grup panel per judul (Override Marker per grup, epic komponen story 4). */
 const TITLE_GROUP: Record<string, DesignGroup> = {
-  'Position & size': 'position',
+  Position: 'position',
   'Auto layout': 'autoLayout',
   Typography: 'typography',
   Icon: 'icon',
+  Appearance: 'appearance',
   Fill: 'fill',
   Stroke: 'stroke',
-  Radius: 'radius',
   Effects: 'effects',
 };
 /** Target + antrean edit untuk Override Marker di header grup (tanpa mengubah tanda tangan tiap grup). */
@@ -875,12 +899,17 @@ function OverrideMarker({ group }: { group: DesignGroup }) {
   );
 }
 
-function Group({ title, action, children, empty }: { title: string; action?: ReactNode; children?: ReactNode; empty?: boolean }) {
+function Group({ title, action, children, empty, summary }: { title: string; action?: ReactNode; children?: ReactNode; empty?: boolean; summary?: string }) {
   const key = TITLE_GROUP[title];
   return (
     <section className={`dp-group${empty ? ' empty' : ''}`}>
       <div className="dp-group-header">
         <h3>{title}</h3>
+        {summary && (
+          <span className="dp-group-summary" title={summary}>
+            {summary}
+          </span>
+        )}
         {action}
       </div>
       {key && <OverrideMarker group={key} />}
@@ -908,9 +937,10 @@ const parsePositive = (t: string) => {
   return n !== undefined && n > 0 ? n : undefined;
 };
 const hexText = (c: unknown) => splitHex(c)?.hex ?? '';
+const pctText = (n: number) => String(Math.round(n * 100));
 const alphaText = (c: unknown) => {
   const s = splitHex(c);
-  return s ? formatPercent(s.alpha) : '';
+  return s ? pctText(s.alpha) : '';
 };
 /** Warna (literal atau resolve) → CSS swatch. */
 const swatchCss = (c: unknown) => (typeof c === 'string' && splitHex(c) ? c : 'transparent');
@@ -974,9 +1004,219 @@ const SIZING_OPTIONS: { value: Sizing; label: string }[] = [
 ];
 const BOARD_HEIGHT_SIZING: { value: Sizing; label: string }[] = SIZING_OPTIONS.slice(0, 2);
 
-function PositionGroup({ targets, ctx, bounds }: { targets: DesignTarget[]; ctx: Ctx; bounds: [number, number, number, number] | undefined }) {
-  const xyEditable = targets.every(canEditXY);
+type AlignCtl = NonNullable<DesignPanelProps['align']>;
+
+/** Tombol ikon yang membuka `Menu` di bawah dirinya sendiri (chip sizing, sides stroke, blend, "+", overflow align). */
+function MenuButton({ icon, title, items, disabled, className, label, closeOnPick = true }: { icon: IconName; title: string; items: () => Item[]; disabled: boolean; className?: string; label?: string; /** `false` = menu tetap terbuka setelah memilih (toggle multi-pilih seperti sides stroke). */ closeOnPick?: boolean }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | undefined>(undefined);
+  return (
+    <>
+      <button
+        type="button"
+        className={className ?? 'dp-icon-btn boxed'}
+        title={title}
+        aria-label={title}
+        aria-haspopup="menu"
+        aria-expanded={pos !== undefined}
+        disabled={disabled}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setPos({ x: r.left, y: r.bottom + 4 });
+        }}
+      >
+        <Icon name={icon} size={13} />
+        {label}
+      </button>
+      {pos && (
+        <Menu
+          x={pos.x}
+          y={pos.y}
+          items={items().map((it) => ({
+            ...it,
+            run: () => {
+              if (closeOnPick) setPos(undefined);
+              it.run();
+            },
+          }))}
+          onClose={() => setPos(undefined)}
+        />
+      )}
+    </>
+  );
+}
+
+/** Chip sizing per sumbu di ujung field W/H (desain Position: "Fill ▾" dalam field) — menggantikan segmented Fixed/Hug/Fill. */
+function SizingChip({ axis, mode, options, disabled, onPick }: { axis: Axis; mode: Sizing | undefined; options: readonly { value: Sizing; label: string }[]; disabled: boolean; onPick: (m: Sizing) => void }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | undefined>(undefined);
+  const text = mode === undefined ? 'Mixed' : (options.find((o) => o.value === mode)?.label ?? 'Fixed');
+  return (
+    <>
+      <button
+        type="button"
+        className="dp-chip"
+        title={`${axis === 'width' ? 'Width' : 'Height'} sizing`}
+        aria-label={`${axis === 'width' ? 'Width' : 'Height'} sizing: ${text}`}
+        aria-haspopup="menu"
+        aria-expanded={pos !== undefined}
+        disabled={disabled}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setPos({ x: r.left, y: r.bottom + 4 });
+        }}
+      >
+        {text}
+        <Icon name="chevronDown" size={10} />
+      </button>
+      {pos && (
+        <Menu
+          x={pos.x}
+          y={pos.y}
+          items={options.map((o) => ({
+            label: o.label,
+            checked: mode === o.value,
+            run: () => {
+              setPos(undefined);
+              onPick(o.value);
+            },
+          }))}
+          onClose={() => setPos(undefined)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Bilah Align & distribute di atas bagian Position (desain badge 1): 6 align + 2 distribute. Di panel sempit
+ * (< 280px, E5) dua tombol distribute disembunyikan CSS dan masuk menu "···" — menyusut, bukan scroll.
+ */
+function AlignBar({ align, disabled }: { align: AlignCtl; disabled: boolean }) {
+  const [more, setMore] = useState<{ x: number; y: number } | undefined>(undefined);
+  const btn = (a: EditAction, cls = '') => (
+    <button key={a} type="button" className={`dp-icon-btn${cls}`} title={actionTitle(a)} aria-label={ACTION_META[a].label} disabled={disabled || !align.enabled[a]} onClick={() => align.run(a)}>
+      <Icon name={ACTION_META[a].icon} size={15} />
+    </button>
+  );
+  return (
+    <div className="dp-align-bar">
+      {ALIGN_ACTIONS.map((a) => btn(a))}
+      {DISTRIBUTE_ACTIONS.map((a) => btn(a, ' dp-align-dist'))}
+      <button
+        type="button"
+        className="dp-icon-btn dp-align-more"
+        title="More alignment actions"
+        aria-label="More alignment actions"
+        aria-haspopup="menu"
+        aria-expanded={more !== undefined}
+        disabled={disabled}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setMore({ x: r.left, y: r.bottom + 4 });
+        }}
+      >
+        <Icon name="ellipsis" size={15} />
+      </button>
+      {more && (
+        <Menu
+          x={more.x}
+          y={more.y}
+          items={DISTRIBUTE_ACTIONS.map((a) => ({
+            label: actionTitle(a),
+            icon: ACTION_META[a].icon,
+            disabled: !align.enabled[a],
+            run: () => {
+              setMore(undefined);
+              align.run(a);
+            },
+          }))}
+          onClose={() => setMore(undefined)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Grid alignment 3×3 (desain Auto layout, E4): baris sel = posisi vertikal, kolom sel = posisi horizontal.
+ * Sumbu utama flex mengikuti arah layout (column: justify = vertikal, align = horizontal — css.ts), jadi baris
+ * sel memetakan justify dan kolom sel memetakan align; row/grid memetakan standar. Klik menulis kedua properti dalam satu commit; `stretch`
+ * dan `space-between` tidak punya sel — space-between dipertahankan (hanya sumbu silang yang ditulis, spt Figma).
+ */
+function AlignGrid({ targets, ctx, layout }: { targets: DesignTarget[]; ctx: Ctx; layout: 'row' | 'column' | 'grid' | 'none' | undefined }) {
+  const align = readField(targets, (n) => n.align ?? 'start');
+  const justify = readField(targets, (n) => n.justify ?? 'start');
+  const AXES = ['start', 'center', 'end'] as const;
+  const col = layout === 'column';
+  const value = (r: string, c: string) => (col ? { align: c, justify: r } : { align: r, justify: c });
+  const on = (v: { align: string; justify: string }) => !align.mixed && !justify.mixed && align.value === v.align && justify.value === v.justify;
+  return (
+    <div className="dp-agrid" role="group" aria-label="Alignment">
+      {AXES.map((r) =>
+        AXES.map((c) => {
+          const v = value(r, c);
+          return (
+            <button
+              key={`${r}-${c}`}
+              type="button"
+              className={`dp-agrid-cell${on(v) ? ' active' : ''}`}
+              aria-label={`Align ${v.align}, justify ${v.justify}`}
+              aria-pressed={on(v)}
+              disabled={ctx.disabled}
+              onClick={() =>
+                ctx.run(
+                  (ts) => opsFor(ts, (t) => (t.stored.justify === 'space-between' ? { align: v.align } : v)),
+                  'Change alignment',
+                )
+              }
+            />
+          );
+        }),
+      )}
+    </div>
+  );
+}
+
+/** Field W/H + chip sizing per sumbu di ujung kanan (desain: "W 1440 · Fill ▾"), menggantikan segmented Fixed/Hug/Fill. */
+function DimField({ targets, ctx, axis }: { targets: DesignTarget[]; ctx: Ctx; axis: Axis }) {
   const board = targets.every((t) => t.type === 'board');
+  const label = axis === 'width' ? 'W' : 'H';
+  const state = readField(targets, (n) => n[axis]);
+  const mode = readSizing(targets, axis);
+  const measured = targets.length === 1 ? targets[0]!.measured?.[axis === 'width' ? 'w' : 'h'] : undefined;
+  const numeric: FieldState = state.mixed || typeof state.value === 'number' || isTokenRef(state.value) ? state : { mixed: false, value: undefined, resolved: undefined };
+  return (
+    <Field
+      label={label}
+      state={numeric}
+      format={num}
+      parse={parseSize}
+      placeholder={measured !== undefined ? formatNumber(measured) : mode === 'fill' ? 'Fill' : 'Hug'}
+      disabled={ctx.disabled}
+      scrub={{ step: 1, min: 0, base: measured }}
+      token={{ spec: propSpec(axis, axis === 'width' ? 'Width' : 'Height'), ctx }}
+      trailing={
+        /* Board: hanya tinggi yang bisa Hug (v8, spec-board-hug-height); lebar board selalu angka, tanpa Fill. */
+        (!board || axis === 'height') && (
+          <SizingChip axis={axis} mode={mode} options={board ? BOARD_HEIGHT_SIZING : SIZING_OPTIONS} disabled={ctx.disabled} onPick={(m) => ctx.run((ts) => setSizing(ts, axis, m), `Change ${axis} sizing`)} />
+        )
+      }
+      onCommit={(v) => ctx.run((ts) => setProp(ts, axis, Math.round(Number(v) * 100) / 100), `Change ${axis}`)}
+    />
+  );
+}
+
+/** Baris W/H dua kolom (desain Auto layout badge 2: W dan H satu baris sesudah baris arah). */
+function DimRow({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
+  return (
+    <div className="dp-row">
+      <DimField targets={targets} ctx={ctx} axis="width" />
+      <DimField targets={targets} ctx={ctx} axis="height" />
+    </div>
+  );
+}
+
+function PositionGroup({ targets, ctx, bounds, align, dims }: { targets: DesignTarget[]; ctx: Ctx; bounds: [number, number, number, number] | undefined; align: AlignCtl | undefined; dims: boolean }) {
+  const xyEditable = targets.every(canEditXY);
   const icon = targets.every((t) => t.type === 'icon');
   const xy = (axis: 'x' | 'y', i: 0 | 1) => {
     const state: FieldState = xyEditable
@@ -996,48 +1236,15 @@ function PositionGroup({ targets, ctx, bounds }: { targets: DesignTarget[]; ctx:
       />
     );
   };
-  const dim = (axis: Axis) => {
-    const label = axis === 'width' ? 'W' : 'H';
-    const state = readField(targets, (n) => n[axis]);
-    const mode = readSizing(targets, axis);
-    const measured = targets.length === 1 ? targets[0]!.measured?.[axis === 'width' ? 'w' : 'h'] : undefined;
-    const numeric: FieldState = state.mixed || typeof state.value === 'number' || isTokenRef(state.value) ? state : { mixed: false, value: undefined, resolved: undefined };
-    return (
-      <div className="dp-row">
-        <Field
-          className="dp-w96"
-          label={label}
-          state={numeric}
-          format={num}
-          parse={parseSize}
-          placeholder={measured !== undefined ? formatNumber(measured) : mode === 'fill' ? 'Fill' : 'Hug'}
-          disabled={ctx.disabled}
-          scrub={{ step: 1, min: 0, base: measured }}
-          token={{ spec: propSpec(axis, axis === 'width' ? 'Width' : 'Height'), ctx }}
-          onCommit={(v) => ctx.run((ts) => setProp(ts, axis, Math.round(Number(v) * 100) / 100), `Change ${axis}`)}
-        />
-        {/* Board: hanya tinggi yang bisa Hug (v8, spec-board-hug-height); lebar board selalu angka, tanpa Fill. */}
-        {(!board || axis === 'height') && (
-          <Segmented<Sizing>
-            label={`${axis === 'width' ? 'Width' : 'Height'} sizing`}
-            className="dp-grow"
-            options={board ? BOARD_HEIGHT_SIZING : SIZING_OPTIONS}
-            value={mode}
-            disabled={ctx.disabled}
-            onPick={(m) => ctx.run((ts) => setSizing(ts, axis, m), `Change ${axis} sizing`)}
-          />
-        )}
-      </div>
-    );
-  };
   return (
-    <Group title="Position & size">
+    <Group title="Position">
+      {align && <AlignBar align={align} disabled={ctx.disabled} />}
       <div className="dp-row">
         {xy('x', 0)}
         {xy('y', 1)}
       </div>
-      {!icon && dim('width')}
-      {!icon && dim('height')}
+      {/* Tipe tanpa seksi Auto layout (board/teks/dll) tetap menyunting W/H di Position (desain badge 2). */}
+      {!icon && dims && <DimRow targets={targets} ctx={ctx} />}
     </Group>
   );
 }
@@ -1048,31 +1255,86 @@ function AutoLayoutGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }
   const grid = layout === 'grid';
   const on = layout === 'row' || layout === 'column' || grid;
   const wrap = readField(targets, (n) => n.wrap === true);
-  const padding = (
-    <Field
-      label="Padding"
-      token={{ spec: propSpec('padding', 'Padding', (n) => n.padding ?? 0), ctx }}
-      state={readField(targets, (n) => n.padding ?? 0)}
-      format={(v) => formatPadding(v)}
-      parse={parsePadding}
-      scrub={{ step: 1, min: 0 }}
-      disabled={ctx.disabled}
-      onCommit={(v) => ctx.run((ts) => setProp(ts, 'padding', v), 'Change padding')}
-    />
-  );
-  const align = <SelectField label="Align" state={readField(targets, (n) => n.align ?? 'start')} options={ALIGN_OPTIONS} disabled={ctx.disabled} onPick={(v) => ctx.run((ts) => setProp(ts, 'align', v), 'Change align')} />;
-  // Grid (desain Xxi0M): Columns | Rows, Column gap | Row gap, Padding | Align. Gap sumbu mewarisi `gap` bila kosong.
-  const axisGap = (key: 'columnGap' | 'rowGap', label: string) => (
+  const wrapOn = !wrap.mixed && wrap.value === true;
+  const align = readField(targets, (n) => n.align ?? 'start');
+  const stretched = !align.mixed && align.value === 'stretch';
+  // Align non-stretch terakhir diingat (Figma): mematikan Stretch mengembalikan align itu, bukan selalu 'start'.
+  const prevAlign = useRef<unknown>('start');
+  useEffect(() => {
+    if (!align.mixed && align.value !== 'stretch') prevAlign.current = align.value ?? 'start';
+  }, [align.mixed, align.mixed ? undefined : align.value]);
+  // Independent padding: tuple 4 sisi membuka mode ini otomatis (E4); toggle square-dashed di ujung baris Pad.
+  const padRaw = readField(targets, (n) => n.padding);
+  const pad4 = !padRaw.mixed && Array.isArray(padRaw.value) && (padRaw.value as unknown[]).length === 4;
+  const [padInd, setPadInd] = useState(pad4);
+  useEffect(() => {
+    if (pad4) setPadInd(true);
+  }, [pad4]);
+  const axisGap = (key: 'columnGap' | 'rowGap', label: string, icon: IconName, hint?: string, gapDisabled?: boolean) => (
     <Field
       label={label}
+      icon={icon}
       state={readField(targets, (n) => axisGapOf(n, key))}
       format={num}
       parse={parseSize}
       scrub={{ step: 1, min: 0 }}
-      disabled={ctx.disabled}
+      disabled={ctx.disabled || gapDisabled === true}
+      {...(hint ? { hint } : {})}
       onCommit={(v) => ctx.run((ts) => setProp(ts, key, v), `Change ${label.toLowerCase()}`)}
       token={{ spec: propSpec(key, label, (n) => axisGapOf(n, key)), ctx }}
     />
+  );
+  // Padding per sumbu (Pad H/V); mode independent menampilkan 4 sisi T/R/B/L (tuple [t,r,b,l]).
+  const padAxis = (axis: PadAxis, icon: IconName, label: string) => (
+    <Field
+      label={label}
+      icon={icon}
+      title={label}
+      state={paddingAxisState(targets, axis)}
+      format={num}
+      parse={parseSize}
+      scrub={{ step: 1, min: 0 }}
+      disabled={ctx.disabled}
+      onCommit={(v) => ctx.run((ts) => setPaddingAxis(ts, axis, v), 'Change padding')}
+      token={{ spec: paddingAxisSpec(axis, label), ctx }}
+    />
+  );
+  const PAD_EDGES: { label: string; aria: string }[] = [
+    { label: 'T', aria: 'Top padding' },
+    { label: 'R', aria: 'Right padding' },
+    { label: 'B', aria: 'Bottom padding' },
+    { label: 'L', aria: 'Left padding' },
+  ];
+  const justify = <SelectField label="Justify" state={readField(targets, (n) => n.justify ?? 'start')} options={JUSTIFY_OPTIONS} disabled={ctx.disabled} onPick={(v) => ctx.run((ts) => setProp(ts, 'justify', v), 'Change justify')} />;
+  const padToggle = (
+    <button
+      type="button"
+      className={`dp-icon-btn boxed${padInd ? ' active' : ''}`}
+      title="Independent padding"
+      aria-label="Independent padding"
+      aria-pressed={padInd}
+      disabled={ctx.disabled}
+      onClick={() => setPadInd((p) => !p)}
+    >
+      <Icon name="squareDashed" size={13} />
+    </button>
+  );
+  // Mode independent mengganti baris H/V di tempat dengan grid 2×2 (desain E4); toggle tetap di ujung baris.
+  const padRow = padInd ? (
+    <div className="dp-row">
+      <div className="dp-pad4">
+        {PAD_EDGES.map((e, i) => (
+          <Field key={e.aria} label={e.label} ariaLabel={e.aria} title={e.aria} state={readField(targets, (n) => paddingEdgeOf(n, i))} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setPaddingEdge(ts, i, v), 'Change padding')} token={{ spec: paddingEdgeSpec(i, e.aria), ctx }} />
+        ))}
+      </div>
+      {padToggle}
+    </div>
+  ) : (
+    <div className="dp-row">
+      {padAxis('h', 'moveHorizontal', 'Horizontal padding')}
+      {padAxis('v', 'moveVertical', 'Vertical padding')}
+      {padToggle}
+    </div>
   );
   return (
     <Group
@@ -1085,82 +1347,83 @@ function AutoLayoutGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }
         )
       }
     >
+      {/* Arah (desain badge 2): 3 ikon — vertical/horizontal/grid; keluar dari auto layout lewat "−" di header. */}
       <div className="dp-row">
-        <Segmented<'none' | 'row' | 'column' | 'grid'>
+        <Segmented<'row' | 'column' | 'grid'>
           label="Direction"
           className="dp-grow"
           options={[
-            { value: 'none', icon: 'squareDashed', title: 'No auto layout' },
-            { value: 'row', icon: 'arrowRight', title: 'Horizontal' },
             { value: 'column', icon: 'arrowDown', title: 'Vertical' },
+            { value: 'row', icon: 'arrowRight', title: 'Horizontal' },
             { value: 'grid', icon: 'layoutGrid', title: 'Grid' },
           ]}
-          value={layout}
+          value={layout === 'none' ? undefined : layout}
           disabled={ctx.disabled}
-          onPick={(v) => ctx.run((ts) => (v === 'grid' ? enterGrid(ts) : setLayout(ts, v === 'none' ? null : v)), 'Change layout direction')}
+          onPick={(v) => ctx.run((ts) => (v === 'grid' ? enterGrid(ts) : setLayout(ts, v)), 'Change layout direction')}
         />
-      </div>
-      {/* Wrap (v9, desain Section 11 PU4cd/oMWUS): No wrap/Wrap + Row gap; hanya di flex, di bawah Direction. */}
-      {!grid && (on || dir.mixed) && (
-        <div className="dp-row">
-          <Segmented<'nowrap' | 'wrap'>
-            label="Wrap"
-            className="dp-grow"
-            options={[
-              { value: 'nowrap', label: 'No wrap' },
-              { value: 'wrap', label: 'Wrap' },
-            ]}
-            value={wrap.mixed ? undefined : wrap.value === true ? 'wrap' : 'nowrap'}
+        {/* Wrap (v9): toggle terpisah, hanya flex. Stretch = align stretch container (desain badge 2). */}
+        {!grid && (on || dir.mixed) && (
+          <button
+            type="button"
+            className={`dp-icon-btn boxed${wrapOn ? ' active' : ''}`}
+            title="Wrap"
+            aria-label="Wrap"
+            aria-pressed={wrapOn}
             disabled={ctx.disabled}
-            onPick={(v) => ctx.run((ts) => setProp(ts, 'wrap', v === 'wrap' ? true : null), 'Change wrap')}
-          />
-          {axisGap('rowGap', 'Row gap')}
+            onClick={() => ctx.run((ts) => setProp(ts, 'wrap', wrapOn ? null : true), 'Change wrap')}
+          >
+            <Icon name="wrapText" size={13} />
+          </button>
+        )}
+        {on && (
+          <button
+            type="button"
+            className={`dp-icon-btn boxed${stretched ? ' active' : ''}`}
+            title="Stretch"
+            aria-label="Stretch"
+            aria-pressed={stretched}
+            disabled={ctx.disabled}
+            onClick={() => ctx.run((ts) => setProp(ts, 'align', stretched ? prevAlign.current : 'stretch'), 'Change align')}
+          >
+            <Icon name="stretchVertical" size={13} />
+          </button>
+        )}
+      </div>
+      {/* W/H (desain badge 2): dua kolom di dalam seksi Auto layout, sesudah baris arah — selalu tampil untuk frame. */}
+      <DimRow targets={targets} ctx={ctx} />
+      {(on || dir.mixed) && (
+        <div className="dp-row dp-auto-grid">
+          <AlignGrid targets={targets} ctx={ctx} layout={layout} />
+          <div className="dp-col">
+            {grid ? axisGap('columnGap', 'Column gap', 'betweenHorizontalStart') : <Field label="Gap" icon={layout === 'row' ? 'betweenHorizontalStart' : 'betweenVerticalStart'} state={readField(targets, (n) => n.gap ?? 0)} format={num} parse={(t) => parseNumber(t)} scrub={{ step: 1 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setProp(ts, 'gap', v), 'Change gap')} token={{ spec: propSpec('gap', 'Gap', (n) => n.gap ?? 0), ctx }} />}
+            {axisGap('rowGap', 'Row gap', 'betweenVerticalStart', !grid && !wrapOn ? 'wrap only' : undefined, !grid && !wrapOn)}
+            {justify}
+          </div>
         </div>
       )}
       {grid && (
-        <>
-          <div className="dp-row">
-            <Field
-              label="Columns"
-              state={readField(targets, (n) => Math.max(1, trackCount(n, 'gridTemplateColumns')))}
-              format={num}
-              parse={parseColumnCount}
-              scrub={{ step: 0.1, min: 1, max: GRID_TRACKS_MAX, toValue: Math.round }}
-              disabled={ctx.disabled}
-              onCommit={(v) => ctx.run((ts) => setTrackCount(ts, 'gridTemplateColumns', v as number), 'Change grid columns')}
-            />
-            <Field
-              label="Rows"
-              state={readField(targets, (n) => trackCount(n, 'gridTemplateRows'))}
-              format={formatRowCount}
-              parse={parseRowCount}
-              placeholder="Auto"
-              disabled={ctx.disabled}
-              onCommit={(v) => ctx.run((ts) => setTrackCount(ts, 'gridTemplateRows', v as number), 'Change grid rows')}
-            />
-          </div>
-          <div className="dp-row">
-            {axisGap('columnGap', 'Column gap')}
-            {axisGap('rowGap', 'Row gap')}
-          </div>
-          <div className="dp-row">
-            {padding}
-            {align}
-          </div>
-        </>
+        <div className="dp-row">
+          <Field
+            label="Columns"
+            state={readField(targets, (n) => Math.max(1, trackCount(n, 'gridTemplateColumns')))}
+            format={num}
+            parse={parseColumnCount}
+            scrub={{ step: 0.1, min: 1, max: GRID_TRACKS_MAX, toValue: Math.round }}
+            disabled={ctx.disabled}
+            onCommit={(v) => ctx.run((ts) => setTrackCount(ts, 'gridTemplateColumns', v as number), 'Change grid columns')}
+          />
+          <Field
+            label="Rows"
+            state={readField(targets, (n) => trackCount(n, 'gridTemplateRows'))}
+            format={formatRowCount}
+            parse={parseRowCount}
+            placeholder="Auto"
+            disabled={ctx.disabled}
+            onCommit={(v) => ctx.run((ts) => setTrackCount(ts, 'gridTemplateRows', v as number), 'Change grid rows')}
+          />
+        </div>
       )}
-      {!grid && (on || dir.mixed) && (
-        <>
-          <div className="dp-row">
-            <Field label="Gap" state={readField(targets, (n) => n.gap ?? 0)} format={num} parse={(t) => parseNumber(t)} scrub={{ step: 1 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setProp(ts, 'gap', v), 'Change gap')} token={{ spec: propSpec('gap', 'Gap', (n) => n.gap ?? 0), ctx }} />
-            {padding}
-          </div>
-          <div className="dp-row">
-            {align}
-            <SelectField label="Justify" state={readField(targets, (n) => n.justify ?? 'start')} options={JUSTIFY_OPTIONS} disabled={ctx.disabled} onPick={(v) => ctx.run((ts) => setProp(ts, 'justify', v), 'Change justify')} />
-          </div>
-        </>
-      )}
+      {(on || dir.mixed) && padRow}
     </Group>
   );
 }
@@ -1337,7 +1600,7 @@ function FillEditor({ index, fill, resolved, ctx }: { index: number; fill: FillL
             <InlineInput
               label="Stop position"
               className="dp-opacity"
-              value={typeof s.offset === 'number' ? formatPercent(s.offset) : ''}
+              value={typeof s.offset === 'number' ? pctText(s.offset) : ''}
               disabled={ctx.disabled}
               onCommit={(t) => {
                 const n = parseNumber(t.replace(/%$/, ''));
@@ -1359,15 +1622,35 @@ function FillGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
   if (all.mixed) {
     return (
       <Group title="Fill" action={add}>
-        <ColorRow
-          state={{ mixed: true }}
+        {/* Baris "Mixed fills" (E2): swatch stripe + input hex (placeholder "Mixed fills"); satu warna meng-unify semua. */}
+        <PaintRow
           disabled={ctx.disabled}
           onRemove={() => ctx.run((ts) => setAllFills(ts, null), 'Remove fills')}
           removeTitle="Remove fills"
-          onColor={(c) => {
-            const next = changeColor(undefined, c);
-            if (next) ctx.run((ts) => setAllFills(ts, [{ type: 'solid', color: next }]), 'Change fill');
-          }}
+          swatch={
+            <Swatch
+              background=""
+              mixed
+              title="Pick color"
+              disabled={ctx.disabled}
+              pick={(hex) => {
+                const next = changeColor(undefined, { hex });
+                if (next) ctx.run((ts) => setAllFills(ts, [{ type: 'solid', color: next }]), 'Change fill');
+              }}
+            />
+          }
+          value={
+            <InlineInput
+              label="Hex color"
+              value=""
+              placeholder="Mixed fills"
+              disabled={ctx.disabled}
+              onCommit={(t) => {
+                const next = parseHex(t) && changeColor(undefined, { hex: t });
+                if (next) ctx.run((ts) => setAllFills(ts, [{ type: 'solid', color: next }]), 'Change fill');
+              }}
+            />
+          }
         />
       </Group>
     );
@@ -1412,6 +1695,7 @@ function FillGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
           <div key={index} className="dp-fill">
             <PaintRow
               drag={dragProps}
+              grip
               disabled={ctx.disabled}
               onRemove={remove}
               removeTitle="Remove fill"
@@ -1437,7 +1721,7 @@ function FillGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
                     }}
                   />
                 ) : (
-                  <span className="dp-muted">100%</span>
+                  <span className="dp-muted">100</span>
                 )
               }
             />
@@ -1461,6 +1745,11 @@ function FillGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
   );
 }
 
+/**
+ * Bagian Stroke (desain badge 5): baris paint, lalu satu baris — select posisi (Inside/Center/Outside, menggantikan
+ * segmented), field lebar, sides sebagai tombol menu (non-vektor; disabled pada path, E3), dan tombol settings yang
+ * membuka blok lanjutan Cap/Join/Dash/Miter (hanya path). Settings disabled pada non-vektor.
+ */
 function StrokeGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
   const has = targets.every((t) => t.stored.stroke !== undefined);
   const any = targets.some((t) => t.stored.stroke !== undefined);
@@ -1469,6 +1758,19 @@ function StrokeGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
   const align = readField(targets, (n) => (n.stroke as Raw | undefined)?.align);
   const sides = readField(targets, (n) => strokeSides(n.stroke));
   const vector = isVectorSelection(targets);
+  // Blok lanjutan (E3) terbuka sendiri bila salah satu nilai bukan default — sama seperti padding/radius tuple.
+  const advNonDefault = targets.some(
+    (t) =>
+      vectorValue(t.stored, 'strokeLinecap') !== VECTOR_DEFAULTS.strokeLinecap ||
+      vectorValue(t.stored, 'strokeLinejoin') !== VECTOR_DEFAULTS.strokeLinejoin ||
+      vectorValue(t.stored, 'strokeMiterlimit') !== VECTOR_DEFAULTS.strokeMiterlimit ||
+      (Array.isArray(t.stored.strokeDasharray) && t.stored.strokeDasharray.length > 0),
+  );
+  const [adv, setAdv] = useState(advNonDefault);
+  useEffect(() => {
+    if (advNonDefault) setAdv(true);
+  }, [advNonDefault]);
+  const sideActive = (s: Side) => !sides.mixed && (sides.value as Side[]).includes(s);
   return (
     <Group
       title="Stroke"
@@ -1491,83 +1793,74 @@ function StrokeGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
             }}
           />
           <div className="dp-row">
-            <Field className="dp-w64" label="W" state={width} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled || !has} onCommit={(v) => ctx.run((ts) => setStroke(ts, { width: v }), 'Change stroke width')} token={{ spec: strokeSpec('width', 'Stroke width'), ctx }} />
-            <Segmented<'inside' | 'center' | 'outside'>
-              label="Stroke align"
+            <SelectField
+              ariaLabel="Stroke position"
               className="dp-grow"
+              state={align}
               options={[
-                { value: 'inside', label: 'Inside' },
-                { value: 'center', label: 'Center' },
-                { value: 'outside', label: 'Outside' },
+                ['inside', 'Inside'],
+                ['center', 'Center'],
+                ['outside', 'Outside'],
               ]}
-              value={align.mixed ? undefined : (align.value as 'inside')}
               disabled={ctx.disabled || !has}
               onPick={(v) => ctx.run((ts) => setStroke(ts, { align: v }), 'Change stroke align')}
             />
-          </div>
-          {vector ? (
-            <VectorStrokeRows targets={targets} ctx={ctx} disabled={ctx.disabled || !has} />
-          ) : (
-            <div className="dp-row">
-              <span className="dp-row-label">Sides</span>
-              <Segmented<Side>
-                label="Stroke sides"
-                className="dp-sides"
-                options={SIDES.map((s) => ({ value: s, icon: (`panel${s[0]!.toUpperCase()}${s.slice(1)}` as IconName), title: `${s[0]!.toUpperCase()}${s.slice(1)}` }))}
-                active={(s) => !sides.mixed && (sides.value as Side[]).includes(s)}
+            <Field className="dp-w64" label="Stroke weight" icon="minus" title="Stroke weight" state={width} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled || !has} onCommit={(v) => ctx.run((ts) => setStroke(ts, { width: v }), 'Change stroke width')} token={{ spec: strokeSpec('width', 'Stroke weight'), ctx }} />
+            {/* Sides adalah multi-pilih: menu tetap terbuka sesudah memilih agar beberapa sisi bisa digabung. */}
+            <MenuButton
+              icon="square"
+              title="Stroke sides"
+              closeOnPick={false}
+              disabled={ctx.disabled || !has || vector}
+              items={() =>
+                SIDES.map((s) => ({
+                  label: `${s[0]!.toUpperCase()}${s.slice(1)}`,
+                  icon: `panel${s[0]!.toUpperCase()}${s.slice(1)}` as IconName,
+                  checked: sideActive(s) ? true : undefined,
+                  run: () => ctx.run((ts) => toggleSide(ts, s), 'Change stroke sides'),
+                }))
+              }
+            />
+            {/* Settings hanya untuk path (E3): disembunyikan pada non-vektor, bukan disabled permanen. */}
+            {vector && (
+              <button
+                type="button"
+                className={`dp-icon-btn boxed${adv ? ' active' : ''}`}
+                title="Stroke settings"
+                aria-label="Stroke settings"
+                aria-expanded={adv}
                 disabled={ctx.disabled || !has}
-                onPick={(s) => ctx.run((ts) => toggleSide(ts, s), 'Change stroke sides')}
-              />
-            </div>
-          )}
+                onClick={() => setAdv((a) => !a)}
+              >
+                <Icon name="settings2" size={13} />
+              </button>
+            )}
+          </div>
+          {vector && adv && <StrokeAdvanced targets={targets} ctx={ctx} disabled={ctx.disabled || !has} />}
         </>
       )}
     </Group>
   );
 }
 
-/** Baris stroke vektor path (desain J7AmQi/S8w37): Cap, Join, lalu Dash + Miter. Nilai kosong tampil sebagai bawaan. */
-function VectorStrokeRows({ targets, ctx, disabled }: { targets: DesignTarget[]; ctx: Ctx; disabled: boolean }) {
+/** Blok lanjutan stroke path (desain E3): select Cap/Join, field Dash (ikon ellipsis) + Miter, strip pratinjau dash. */
+function StrokeAdvanced({ targets, ctx, disabled }: { targets: DesignTarget[]; ctx: Ctx; disabled: boolean }) {
   const cap = readField(targets, (n) => vectorValue(n, 'strokeLinecap'));
   const join = readField(targets, (n) => vectorValue(n, 'strokeLinejoin'));
   const dash = readField(targets, (n) => n.strokeDasharray);
   const miter = readField(targets, (n) => vectorValue(n, 'strokeMiterlimit'));
+  const dashText = dash.mixed ? '' : formatDash(dash.resolved ?? dash.value);
   return (
-    <>
+    <div className="dp-stroke-adv">
       <div className="dp-row">
-        <span className="dp-row-label dp-vec-label">Cap</span>
-        <Segmented<'butt' | 'round' | 'square'>
-          label="Stroke cap"
-          className="dp-grow"
-          options={[
-            { value: 'butt', label: 'Butt' },
-            { value: 'round', label: 'Round' },
-            { value: 'square', label: 'Square' },
-          ]}
-          value={cap.mixed ? undefined : (cap.value as 'butt')}
-          disabled={disabled}
-          onPick={(v) => ctx.run((ts) => setVector(ts, 'strokeLinecap', v), 'Change stroke cap')}
-        />
-      </div>
-      <div className="dp-row">
-        <span className="dp-row-label dp-vec-label">Join</span>
-        <Segmented<'miter' | 'round' | 'bevel'>
-          label="Stroke join"
-          className="dp-grow"
-          options={[
-            { value: 'miter', label: 'Miter' },
-            { value: 'round', label: 'Round' },
-            { value: 'bevel', label: 'Bevel' },
-          ]}
-          value={join.mixed ? undefined : (join.value as 'miter')}
-          disabled={disabled}
-          onPick={(v) => ctx.run((ts) => setVector(ts, 'strokeLinejoin', v), 'Change stroke join')}
-        />
+        <SelectField label="Cap" className="dp-grow" state={cap} options={[['butt', 'Butt'], ['round', 'Round'], ['square', 'Square']]} disabled={disabled} onPick={(v) => ctx.run((ts) => setVector(ts, 'strokeLinecap', v), 'Change stroke cap')} />
+        <SelectField label="Join" className="dp-grow" state={join} options={[['miter', 'Miter'], ['round', 'Round'], ['bevel', 'Bevel']]} disabled={disabled} onPick={(v) => ctx.run((ts) => setVector(ts, 'strokeLinejoin', v), 'Change stroke join')} />
       </div>
       <div className="dp-row">
         <Field
           className="dp-grow"
           label="Dash"
+          icon="ellipsis"
           title="Dash pattern in px, e.g. 4 2"
           placeholder="None"
           state={dash}
@@ -1588,11 +1881,23 @@ function VectorStrokeRows({ targets, ctx, disabled }: { targets: DesignTarget[];
           onCommit={(v) => ctx.run((ts) => setVector(ts, 'strokeMiterlimit', v), 'Change miter limit')}
         />
       </div>
-    </>
+      {/* Strip pratinjau dash 20px (desain E3): garis `strokeDasharray` sesuai nilai field. */}
+      <svg className="dp-dashline" aria-hidden="true" height="4" width="100%">
+        <line x1="0" y1="2" x2="100%" y2="2" strokeDasharray={dashText || 'none'} />
+      </svg>
+    </div>
   );
 }
 
-function RadiusGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
+/**
+ * Bagian Appearance (desain badge 3): Opacity + Radius satu baris; blend mode = tombol droplet di header
+ * (menampilkan mode aktif); toggle scan membuka 4 sudut radius (tuple, "Mixed" bila beda). Radius hanya untuk
+ * tipe dengan `radius` di skema (frame/rect — RADIUS_TYPES); opacity/blend untuk semua tipe.
+ */
+function AppearanceGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
+  const blend = readField(targets, (n) => n.blend ?? 'normal');
+  const blendText = blend.mixed ? 'Mixed' : (BLEND_OPTIONS.find(([v]) => v === blend.value)?.[1] ?? 'Normal');
+  const canRadius = targets.every((t) => RADIUS_TYPES.has(t.type));
   const raw = readField(targets, (n) => n.radius);
   const resolvedAll = raw.mixed ? undefined : radiusAll(raw.resolved);
   const storedAll = raw.mixed ? undefined : radiusAll(raw.value);
@@ -1609,110 +1914,238 @@ function RadiusGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
     const r = Array.isArray(raw.resolved) ? raw.resolved[i] : (raw.resolved ?? 0);
     return { mixed: false, value: s, resolved: r };
   };
+  const CORNER_ICON: readonly IconName[] = ['arrowUpLeft', 'arrowUpRight', 'arrowDownRight', 'arrowDownLeft'];
+  // Toggle independent corners: tombol 28×28 di ujung baris (desain E4) — saudara field, bukan `trailing`
+  // (tombol token absolut di dalam field menutupi klik — temuan review #2).
+  const cornerToggle = canRadius && (
+    <button
+      type="button"
+      className={`dp-icon-btn boxed${corners ? ' active' : ''}`}
+      title="Independent corners"
+      aria-label="Independent corners"
+      aria-pressed={corners}
+      disabled={ctx.disabled}
+      onClick={() => setCorners((c) => !c)}
+    >
+      <Icon name="scan" size={13} />
+    </button>
+  );
   return (
-    <Group title="Radius">
-      <div className="dp-row">
-        <Field label="All" className="dp-grow" state={allState} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setRadiusAll(ts, v), 'Change radius')} token={{ spec: radiusSpec(), ctx }} />
-        <button
-          type="button"
-          className={`dp-icon-btn boxed${corners ? ' active' : ''}`}
-          title="Independent corners"
-          aria-label="Independent corners"
-          aria-pressed={corners}
+    <Group
+      title="Appearance"
+      summary={blendText}
+      action={
+        <MenuButton
+          icon="droplet"
+          className="dp-header-btn"
+          title={`Blend mode: ${blendText}`}
           disabled={ctx.disabled}
-          onClick={() => setCorners((c) => !c)}
-        >
-          <Icon name="scan" size={14} />
-        </button>
-      </div>
-      {corners && (
+          items={() =>
+            BLEND_OPTIONS.map(([v, l]) => ({
+              label: l,
+              checked: !blend.mixed && blend.value === v,
+              run: () => ctx.run((ts) => setProp(ts, 'blend', v), 'Change blend mode'),
+            }))
+          }
+        />
+      }
+    >
+      {/* Mode corners mengganti baris Opacity+Radius di tempat dengan grid 2×2 (desain E4). */}
+      {canRadius && corners ? (
         <div className="dp-row">
-          {CORNERS.map((c, i) => (
-            <Field key={c} label={c} state={corner(i)} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setRadiusCorner(ts, i, v), 'Change corner radius')} token={{ spec: radiusSpec(i, `${c} radius`), ctx }} />
-          ))}
+          <div className="dp-corners">
+            {CORNERS.map((c, i) => (
+              <Field key={c} label={`${c} corner radius`} title={`${c} corner radius`} icon={CORNER_ICON[i]} state={corner(i)} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setRadiusCorner(ts, i, v), 'Change corner radius')} token={{ spec: radiusSpec(i, `${c} radius`), ctx }} />
+            ))}
+          </div>
+          {cornerToggle}
+        </div>
+      ) : (
+        <div className="dp-row">
+          <Field
+            label="Opacity"
+            icon="blend"
+            title="Opacity"
+            className="dp-grow"
+            state={readField(targets, (n) => n.opacity ?? 1)}
+            format={(v) => (typeof v === 'number' ? formatPercent(v) : '')}
+            parse={parsePercent}
+            scrub={{ step: 0.01, min: 0, max: 1 }}
+            disabled={ctx.disabled}
+            onCommit={(v) => ctx.run((ts) => setProp(ts, 'opacity', v), 'Change opacity')}
+          />
+          {canRadius && (
+            <Field
+              label="Radius"
+              icon="squareRoundCorner"
+              title="Radius"
+              className="dp-grow"
+              state={allState}
+              format={num}
+              parse={parseSize}
+              scrub={{ step: 1, min: 0 }}
+              disabled={ctx.disabled}
+              onCommit={(v) => ctx.run((ts) => setRadiusAll(ts, v), 'Change radius')}
+              token={{ spec: radiusSpec(), ctx }}
+            />
+          )}
+          {cornerToggle}
         </div>
       )}
     </Group>
   );
 }
 
+const EFFECT_LABEL: Record<EffectKind, string> = { drop: 'Drop shadow', inner: 'Inner shadow', blur: 'Layer blur', backdropBlur: 'Background blur' };
+const EFFECT_KINDS: readonly EffectKind[] = ['drop', 'inner', 'blur', 'backdropBlur'];
+const SCALAR_KIND = new Set<EffectKind>(['blur', 'backdropBlur']);
+
+/**
+ * Bagian Effects (desain badge 6): baris bertipe — tombol settings (editor sebaris), select jenis, "−". Menu "+"
+ * menawarkan 4 jenis; blur/backdropBlur (skalar) maksimal satu baris. Per-baris eye FIGMA-ONLY (tak ada di model).
+ * Spread shadow FIGMA-ONLY: model mengedit shadow sebagai objek {x,y,blur,color}; spread tersimpan tak dihapus.
+ */
 function EffectsGroup({ targets, ctx }: { targets: DesignTarget[]; ctx: Ctx }) {
   const shadows = readField(targets, (n) => n.shadows);
   const list = !shadows.mixed && Array.isArray(shadows.value) ? (shadows.value as Raw[]) : [];
   const rList = !shadows.mixed && Array.isArray(shadows.resolved) ? (shadows.resolved as Raw[]) : list;
+  const blurState = readField(targets, (n) => n.blur);
+  const backState = readField(targets, (n) => n.backdropBlur);
+  const used = new Set<EffectKind>();
+  for (const t of targets) for (const k of effectKindsOf(t.stored)) used.add(k);
+  const [open, setOpen] = useState<string | undefined>(undefined);
+  // Baris "Mixed" tetap digambar saat nilai skalar beda antar target (E2): tanpa itu nilai tak terlihat/dihapus.
+  const rows: { key: string; kind: EffectKind; index: number }[] = [
+    ...list.map((s, i) => ({ key: `s${i}`, kind: (s.type === 'inner' ? 'inner' : 'drop') as EffectKind, index: i })),
+    ...(blurState.mixed || (typeof blurState.value === 'number' && blurState.value !== 0) ? [{ key: 'blur', kind: 'blur' as EffectKind, index: -1 }] : []),
+    ...(backState.mixed || (typeof backState.value === 'number' && backState.value !== 0) ? [{ key: 'bd', kind: 'backdropBlur' as EffectKind, index: -1 }] : []),
+  ];
+  /** Editor sebaris satu baris: X/Y/Blur + warna untuk shadow; kolom Blur untuk blur skalar. */
+  const editor = (row: (typeof rows)[number]) =>
+    SCALAR_KIND.has(row.kind) ? (
+      <div className="dp-fx-edit">
+        <div className="dp-row">
+          <Field
+            label="Blur"
+            className="dp-grow"
+            state={row.kind === 'blur' ? blurState : backState}
+            format={num}
+            parse={parseSize}
+            scrub={{ step: 1, min: 0 }}
+            disabled={ctx.disabled}
+            onCommit={(v) => ctx.run((ts) => setProp(ts, row.kind, v), `Change ${EFFECT_LABEL[row.kind].toLowerCase()}`)}
+          />
+        </div>
+      </div>
+    ) : (
+      <ShadowEditor index={row.index} shadow={list[row.index]!} resolved={rList[row.index] ?? list[row.index]!} ctx={ctx} />
+    );
   return (
-    <Group title="Effects" action={<HeaderButton icon="plus" title="Add shadow" disabled={ctx.disabled} onClick={() => ctx.run((ts) => addShadow(ts), 'Add shadow')} />}>
-      <div className="dp-row">
-        <Field
-          label="Opacity"
-          state={readField(targets, (n) => n.opacity ?? 1)}
-          format={(v) => (typeof v === 'number' ? formatPercent(v) : '')}
-          parse={parsePercent}
-          scrub={{ step: 0.01, min: 0, max: 1 }}
+    <Group
+      title="Effects"
+      action={
+        <MenuButton
+          icon="plus"
+          className="dp-header-btn"
+          title="Add effect"
           disabled={ctx.disabled}
-          onCommit={(v) => ctx.run((ts) => setProp(ts, 'opacity', v), 'Change opacity')}
+          items={() =>
+            EFFECT_KINDS.map((k) => ({
+              label: EFFECT_LABEL[k],
+              disabled: SCALAR_KIND.has(k) && used.has(k),
+              run: () => ctx.run((ts) => addEffect(ts, k), `Add ${EFFECT_LABEL[k].toLowerCase()}`),
+            }))
+          }
         />
-        <SelectField label="Blend" state={readField(targets, (n) => n.blend ?? 'normal')} options={BLEND_OPTIONS} disabled={ctx.disabled} onPick={(v) => ctx.run((ts) => setProp(ts, 'blend', v), 'Change blend mode')} />
-      </div>
-      <div className="dp-row">
-        <Field label="Blur" state={readField(targets, (n) => n.blur ?? 0)} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setProp(ts, 'blur', v), 'Change blur')} />
-        <Field label="Backdrop" state={readField(targets, (n) => n.backdropBlur ?? 0)} format={num} parse={parseSize} scrub={{ step: 1, min: 0 }} disabled={ctx.disabled} onCommit={(v) => ctx.run((ts) => setProp(ts, 'backdropBlur', v), 'Change backdrop blur')} />
-      </div>
-      {shadows.mixed ? (
-        <PaintRow disabled={ctx.disabled} swatch={<Swatch background="transparent" title="Mixed" disabled />} value={<span className="dp-muted">Mixed shadows</span>} onRemove={() => ctx.run((ts) => setProp(ts, 'shadows', null), 'Remove shadows')} removeTitle="Remove shadows" />
-      ) : (
-        list.map((s, i) => {
-          const r = rList[i] ?? s;
-          return (
-            <PaintRow
-              key={i}
-              disabled={ctx.disabled}
-              removeTitle="Remove shadow"
-              onRemove={() => ctx.run((ts) => removeShadow(ts, i), 'Remove shadow')}
-              swatch={
-                <Swatch
-                  background={swatchCss(r.color)}
-                  title="Pick shadow color"
+      }
+    >
+      {shadows.mixed && <PaintRow disabled={ctx.disabled} swatch={<Swatch background="transparent" title="Mixed" disabled />} value={<span className="dp-muted">Mixed shadows</span>} onRemove={() => ctx.run((ts) => setProp(ts, 'shadows', null), 'Remove shadows')} removeTitle="Remove shadows" />}
+      {rows.map((row, ri) => {
+        const isOpen = open === row.key;
+        const scalar = SCALAR_KIND.has(row.kind) ? (row.kind === 'blur' ? blurState : backState) : undefined;
+        return (
+          <div key={row.key} className="dp-fx">
+            <div className="dp-fx-row">
+              <button
+                type="button"
+                className={`dp-icon-btn boxed${isOpen ? ' active' : ''}`}
+                title={`${EFFECT_LABEL[row.kind]} settings`}
+                aria-label={`${EFFECT_LABEL[row.kind]} settings`}
+                aria-expanded={isOpen}
+                disabled={ctx.disabled}
+                onClick={() => setOpen((o) => (o === row.key ? undefined : row.key))}
+              >
+                <Icon name="settings2" size={13} />
+              </button>
+              <label className="dp-select dp-grow">
+                <select
+                  aria-label={`Effect type ${ri + 1}`}
+                  value={row.kind}
                   disabled={ctx.disabled}
-                  pick={(hex) => ctx.run((ts) => editShadow(ts, i, (x, rx) => { const c = changeColor(rx.color, { hex }); return c ? { ...x, color: c } : undefined; }), 'Change shadow color')}
-                />
-              }
-              value={
-                <InlineInput
-                  label="Shadow"
-                  value={formatShadow(s as never)}
-                  disabled={ctx.disabled}
-                  onCommit={(t) => {
-                    const p = parseShadow(t, s.type === 'inner' ? 'inner' : 'drop');
-                    if (!p) return;
-                    ctx.run(
-                      (ts) => editShadow(ts, i, (x) => {
-                        const { spread: _s, ...rest } = x;
-                        return { ...rest, ...p };
-                      }),
-                      'Change shadow',
-                    );
-                  }}
-                />
-              }
-              opacity={
-                <InlineInput
-                  label="Shadow opacity"
-                  className="dp-opacity"
-                  value={alphaText(r.color)}
-                  disabled={ctx.disabled || !splitHex(r.color)}
-                  onCommit={(t) => {
-                    const a = parsePercent(t);
-                    if (a === undefined) return;
-                    ctx.run((ts) => editShadow(ts, i, (x, rx) => { const c = changeColor(rx.color, { alpha: a }); return c ? { ...x, color: c } : undefined; }), 'Change shadow opacity');
-                  }}
-                />
-              }
-            />
-          );
-        })
-      )}
+                  onChange={(e) => ctx.run((ts) => convertEffect(ts, row.index >= 0 ? { index: row.index } : (row.kind as 'blur' | 'backdropBlur'), e.currentTarget.value as EffectKind), 'Change effect type')}
+                >
+                  {EFFECT_KINDS.map((k) => (
+                    <option key={k} value={k} disabled={k !== row.kind && SCALAR_KIND.has(k) && used.has(k)}>
+                      {EFFECT_LABEL[k]}
+                    </option>
+                  ))}
+                </select>
+                {/* Petunjuk nilai skalar di select (desain E3: "8"/"24" sebelum chevron); Mixed saat nilai beda. */}
+                {scalar && <span className="dp-select-hint">{scalar.mixed ? 'Mixed' : num(scalar.value)}</span>}
+                <Icon name="chevronDown" size={12} className="dp-select-chevron" />
+              </label>
+              <button
+                type="button"
+                className="dp-icon-btn"
+                title={`Remove ${EFFECT_LABEL[row.kind].toLowerCase()}`}
+                aria-label={`Remove ${EFFECT_LABEL[row.kind].toLowerCase()}`}
+                disabled={ctx.disabled}
+                onClick={() => {
+                  setOpen(undefined);
+                  ctx.run((ts) => removeEffect(ts, row.kind, Math.max(0, row.index)), `Remove ${EFFECT_LABEL[row.kind].toLowerCase()}`);
+                }}
+              >
+                <Icon name="minus" size={14} />
+              </button>
+            </div>
+            {isOpen && editor(row)}
+          </div>
+        );
+      })}
     </Group>
+  );
+}
+
+/** Editor sebaris shadow (desain E3-style): X, Y, Blur + baris warna (swatch + hex + alpha). */
+function ShadowEditor({ index, shadow, resolved, ctx }: { index: number; shadow: Raw; resolved: Raw; ctx: Ctx }) {
+  const field = (key: 'x' | 'y' | 'blur', label: string) => (
+    <Field
+      label={label}
+      className="dp-grow"
+      state={{ mixed: false, value: shadow[key], resolved: resolved[key] }}
+      format={num}
+      parse={(t) => parseNumber(t, key === 'blur' ? { min: 0 } : undefined)}
+      scrub={{ step: 1, ...(key === 'blur' ? { min: 0 } : {}) }}
+      disabled={ctx.disabled}
+      onCommit={(v) => ctx.run((ts) => editShadow(ts, index, (x) => ({ ...x, [key]: v })), `Change shadow ${label.toLowerCase()}`)}
+    />
+  );
+  return (
+    <div className="dp-fx-edit">
+      <div className="dp-row">
+        {field('x', 'X')}
+        {field('y', 'Y')}
+        {field('blur', 'Blur')}
+      </div>
+      <ColorRow
+        state={{ mixed: false, value: shadow.color, resolved: resolved.color }}
+        disabled={ctx.disabled}
+        onColor={(c) => {
+          const next = changeColor(resolved.color, c);
+          if (next) ctx.run((ts) => editShadow(ts, index, (x) => ({ ...x, color: next })), 'Change shadow color');
+        }}
+      />
+    </div>
   );
 }
 
@@ -1741,8 +2174,8 @@ export type DesignPanelProps = {
   component?: ComponentPanel | undefined;
   /** Penjalan aksi props/slot komponen (story 5): op dari dokumen terbaru, satu permintaan ops per aksi. */
   componentEdit?: ComponentEdit | undefined;
-  /** Buka dialog Export code untuk node primer (epic kode story 5); undefined = item disembunyikan. */
-  onExportCode?: ((id: string) => void) | undefined;
+  /** Buka dialog Export code untuk node primer (epic kode story 5, seksi Code: `target` awal); undefined = item disembunyikan. */
+  onExportCode?: ((id: string, target?: CodegenTarget) => void) | undefined;
   /** Mode edit titik path node primer (paste-vektor story 5, desain J7AmQi): grup Point menggantikan Position & size. */
   pathEdit?: PathEditPanel | undefined;
   /** Dokumen terkini untuk seksi Theme (spec-viewer-merged-design-tab); ops token lewat `onCommit`. */
@@ -1812,37 +2245,6 @@ function InstanceGroup({ info, disabled, edit }: { info: Extract<ComponentPanel,
   );
 }
 
-/** Grup "Theme mode" board (desain tuEOt/mjY37): ≤ 3 mode = segmented, lebih = select; mode pertama = default. */
-function ThemeModeGroup({ targets, ctx, modes }: { targets: DesignTarget[]; ctx: Ctx; modes: readonly string[] }) {
-  const current = readThemeMode(targets, modes);
-  const pick = (m: string) => ctx.run((ts) => themeModeOps(ts, m, modes), 'Change theme mode');
-  return (
-    <Group title="Theme mode" action={<Icon name="palette" size={13} className="dp-group-icon" />}>
-      {modes.length <= 3 ? (
-        <Segmented label="Theme mode" options={modes.map((m) => ({ value: m, label: modeLabel(m), icon: modeIcon(m) }))} value={current} onPick={pick} disabled={ctx.disabled} />
-      ) : (
-        <SelectField state={current === undefined ? { mixed: true } : { mixed: false, value: current, resolved: current }} options={modes.map((m) => [m, modeLabel(m)] as const)} onPick={pick} disabled={ctx.disabled} />
-      )}
-      <span className="dp-helper">Applies to every layer on this board, including instances.</span>
-    </Group>
-  );
-}
-
-/** Grup "Align & distribute": 6 align + 2 distribute, satu permintaan ops per klik (dijalankan Viewer). */
-function AlignGroup({ align, disabled }: { align: NonNullable<DesignPanelProps['align']>; disabled: boolean }) {
-  return (
-    <Group title="Align & distribute">
-      <div className="dp-row dp-align-row">
-        {[...ALIGN_ACTIONS, ...DISTRIBUTE_ACTIONS].map((a) => (
-          <button key={a} type="button" className="dp-icon-btn" title={actionTitle(a)} aria-label={ACTION_META[a].label} disabled={disabled || !align.enabled[a]} onClick={() => align.run(a)}>
-            <Icon name={ACTION_META[a].icon} size={15} />
-          </button>
-        ))}
-      </div>
-    </Group>
-  );
-}
-
 export function DesignPanel({ targets, path, editable, fonts, inspectNode, rev, onCommit, align, tokenModes, tokens, component, componentEdit, onExportCode, pathEdit, doc, slug, exportSel, onImportCss, onImportDtcg, importOpen }: DesignPanelProps) {
   const [menu, setMenu] = useState<{ x: number; y: number } | undefined>(undefined);
   const [picker, setPicker] = useState<{ anchor: HTMLElement; spec: TokenSpec; trigger: HTMLElement | undefined } | undefined>(undefined);
@@ -1904,7 +2306,8 @@ export function DesignPanel({ targets, path, editable, fonts, inspectNode, rev, 
           <span>Select a layer or a board on the canvas to edit its design.</span>
         </div>
         <ThemeSection doc={doc} rev={rev} editable={editable} onCommit={onCommit} onImportCss={onImportCss} onImportDtcg={onImportDtcg} importOpen={importOpen} />
-        <ExportSection slug={slug} sel={undefined} onExportCode={undefined} />
+        <ExportSection slug={slug} sel={undefined} />
+        <CodeSection sel={undefined} onExportCode={onExportCode} />
       </div>
     );
   }
@@ -1959,7 +2362,8 @@ export function DesignPanel({ targets, path, editable, fonts, inspectNode, rev, 
   // Posisi terukur relatif board (anak flow); hanya untuk seleksi tunggal.
   const bounds = node?.bounds;
   return (
-    <div className="inspect design-panel">
+    // `readonly` (E6): seluruh kontrol panel di-dim 60% bila keadaan baca-saja nyata (pratinjau versi/offline).
+    <div className={`inspect design-panel${editable ? '' : ' readonly'}`}>
       <div className="selection-header">
         <span className={`type-badge${comp?.kind === 'master' || comp?.kind === 'instance' ? ' component' : ''}`}>
           <Icon name={badgeIcon} size={14} />
@@ -2021,21 +2425,33 @@ export function DesignPanel({ targets, path, editable, fonts, inspectNode, rev, 
           {comp?.kind === 'instance' && <InstanceGroup info={comp} disabled={!editable} edit={componentEdit} />}
           {comp?.kind === 'master' && comp.model && componentEdit && <MasterComponentGroup model={comp.model} edit={componentEdit} disabled={!editable} />}
           {comp?.kind === 'slotFrame' && componentEdit && <SlotFrameGroup {...comp} edit={componentEdit} disabled={!editable} />}
-          {multi && align && <AlignGroup align={align} disabled={!editable} />}
-          {tokenModes && tokenModes.length > 0 && targets.every((t) => t.type === 'board') && <ThemeModeGroup targets={targets} ctx={ctx} modes={tokenModes} />}
           {points && <PointGroup edit={points} disabled={!editable} />}
-          {groups.includes('position') && !points && <PositionGroup targets={targets} ctx={ctx} bounds={bounds} />}
+          {groups.includes('position') && !points && <PositionGroup targets={targets} ctx={ctx} bounds={bounds} align={align} dims={!groups.includes('autoLayout')} />}
           {groups.includes('autoLayout') && <AutoLayoutGroup targets={targets} ctx={ctx} />}
           {groups.includes('typography') && <TypographyGroup targets={targets} ctx={ctx} fonts={fonts} />}
           {groups.includes('icon') && <IconGroup targets={targets} ctx={ctx} />}
+          {groups.includes('appearance') && <AppearanceGroup targets={targets} ctx={ctx} />}
           {groups.includes('fill') && <FillGroup targets={targets} ctx={ctx} />}
           {groups.includes('stroke') && <StrokeGroup targets={targets} ctx={ctx} />}
-          {groups.includes('radius') && <RadiusGroup targets={targets} ctx={ctx} />}
           {groups.includes('effects') && <EffectsGroup targets={targets} ctx={ctx} />}
         </Fragment>
       </OverrideContext.Provider>
-      <ThemeSection doc={doc} rev={rev} editable={editable} onCommit={onCommit} onImportCss={onImportCss} onImportDtcg={onImportDtcg} importOpen={importOpen} />
-      <ExportSection slug={slug} sel={exportSel} onExportCode={exportSel && onExportCode ? () => onExportCode(exportSel.nodeId) : undefined} />
+      <ThemeSection
+        doc={doc}
+        rev={rev}
+        editable={editable}
+        onCommit={onCommit}
+        boardTheme={
+          tokenModes && tokenModes.length > 0 && targets.every((t) => t.type === 'board')
+            ? { targets, modes: tokenModes, onPick: (m: string) => ctx.run((ts) => themeModeOps(ts, m, tokenModes), 'Change theme mode') }
+            : undefined
+        }
+        onImportCss={onImportCss}
+        onImportDtcg={onImportDtcg}
+        importOpen={importOpen}
+      />
+      <ExportSection slug={slug} sel={exportSel} />
+      <CodeSection sel={exportSel} onExportCode={onExportCode} />
       {!editable && (
         <div className="read-only-note">
           <Icon name="lock" size={14} />

@@ -202,6 +202,20 @@ const ICONS = {
   // Prototipe (spec-prototype-mode): tombol Present dan bendera awal flow di canvas.
   play: [['path', 'm6 4 14 8-14 8V4z']],
   flag: [['path', 'M4 22V4c4-2 8 2 16 0v12c-8 2-12-2-16 0']],
+  // Panel Design ala Figma (spec-design-panel-figma): ikon baris field, toggle, dan efek.
+  gripVertical: [['circle', 9, 5, 1], ['circle', 9, 12, 1], ['circle', 9, 19, 1], ['circle', 15, 5, 1], ['circle', 15, 12, 1], ['circle', 15, 19, 1]],
+  droplet: [['path', 'M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z']],
+  blend: [['circle', 15, 9, 6], ['circle', 9, 15, 6]],
+  settings2: [['path', 'M20 7h-9'], ['path', 'M14 17H5'], ['circle', 17, 17, 3], ['circle', 7, 7, 3]],
+  moveVertical: [['path', 'm8 18 4 4 4-4'], ['path', 'm8 6 4-4 4 4'], ['path', 'M12 2v20']],
+  betweenHorizontalStart: [['rect', 3, 8, 7, 13, 1], ['path', 'm15 2-3 3 3 3'], ['rect', 14, 8, 7, 13, 1]],
+  betweenVerticalStart: [['rect', 8, 3, 13, 7, 1], ['path', 'm9 22-3-3 3-3'], ['rect', 8, 14, 13, 7, 1]],
+  wrapText: [['path', 'm16 16-2 2 2 2'], ['path', 'M3 12h15a3 3 0 1 1 0 6h-4'], ['path', 'M3 18h7'], ['path', 'M3 6h18']],
+  stretchVertical: [['rect', 4, 2, 6, 20, 2], ['rect', 14, 2, 6, 20, 2]],
+  squareRoundCorner: [['path', 'M21 11a8 8 0 0 0-8-8'], ['path', 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4']],
+  arrowUpLeft: [['path', 'M7 17V7h10'], ['path', 'M17 17 7 7']],
+  arrowDownLeft: [['path', 'M17 7 7 17'], ['path', 'M17 17H7V7']],
+  arrowDownRight: [['path', 'm7 7 10 10'], ['path', 'M17 7v10H7']],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof ICONS;

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addEffect,
   addFill,
   addShadow,
   addStroke,
   axisGapOf,
   canEditXY,
+  convertEffect,
   formatRowCount,
   GRID_TRACKS_MAX,
   parseColumnCount,
@@ -15,21 +17,28 @@ import {
   editFill,
   editShadow,
   editStop,
+  effectKindsOf,
   enterGrid,
   fillRows,
   keepsToken,
   layoutOf,
   moveFill,
   opsFor,
+  paddingAxisState,
+  paddingEdgeOf,
+  paddingEdges,
   parentLayoutOf,
   radiusAll,
   readField,
   readSizing,
+  removeEffect,
   removeFill,
   removeShadow,
   removeStroke,
   setAllFills,
   setLayout,
+  setPaddingAxis,
+  setPaddingEdge,
   setProp,
   setRadiusAll,
   setRadiusCorner,
@@ -59,11 +68,11 @@ const t = (id: string, type: string, stored: Raw, extra: Partial<DesignTarget> =
 describe('designModel', () => {
   it('kelompok per tipe dan irisan multi-select', () => {
     expect(designGroups([t('a', 'board', {})])).toEqual(['position', 'fill']);
-    expect(designGroups([t('a', 'frame', {})])).toEqual(['position', 'autoLayout', 'fill', 'stroke', 'radius', 'effects']);
-    expect(designGroups([t('a', 'text', {})])).toEqual(['position', 'typography', 'effects']);
-    expect(designGroups([t('a', 'icon', {})])).toEqual(['position', 'icon', 'effects']);
-    expect(designGroups([t('a', 'frame', {}), t('b', 'rect', {})])).toEqual(['position', 'fill', 'stroke', 'radius', 'effects']);
-    expect(designGroups([t('a', 'frame', {}), t('b', 'text', {})])).toEqual(['position', 'effects']);
+    expect(designGroups([t('a', 'frame', {})])).toEqual(['position', 'autoLayout', 'appearance', 'fill', 'stroke', 'effects']);
+    expect(designGroups([t('a', 'text', {})])).toEqual(['position', 'typography', 'appearance', 'effects']);
+    expect(designGroups([t('a', 'icon', {})])).toEqual(['position', 'icon', 'appearance', 'effects']);
+    expect(designGroups([t('a', 'frame', {}), t('b', 'rect', {})])).toEqual(['position', 'appearance', 'fill', 'stroke', 'effects']);
+    expect(designGroups([t('a', 'frame', {}), t('b', 'text', {})])).toEqual(['position', 'appearance', 'effects']);
     expect(designGroups([])).toEqual([]);
   });
 
@@ -232,6 +241,54 @@ describe('designModel', () => {
       patch: { shadows: [{ type: 'inner', x: 0, y: 2, blur: 6, spread: 1, color: '#00000033' }] },
     });
     expect(removeShadow([s], 0)).toEqual([{ op: 'update', id: 'b', patch: { shadows: null } }]);
+  });
+
+  it('efek bertipe (spec-design-panel-figma): addEffect 4 jenis, skalar maksimal 1; removeEffect', () => {
+    const f = t('a', 'frame', {});
+    expect(effectKindsOf(f.stored)).toEqual(new Set());
+    expect(addEffect([f], 'inner')).toEqual([{ op: 'update', id: 'a', patch: { shadows: [{ type: 'inner', x: 0, y: 4, blur: 12, color: '#00000033' }] } }]);
+    expect(addEffect([f], 'blur')).toEqual([{ op: 'update', id: 'a', patch: { blur: 8 } }]);
+    expect(addEffect([f], 'backdropBlur')).toEqual([{ op: 'update', id: 'a', patch: { backdropBlur: 8 } }]);
+    // Skalar yang sudah terisi (≠0) tidak menambah baris kedua.
+    expect(addEffect([t('b', 'frame', { blur: 4 })], 'blur')).toEqual([]);
+    expect(addEffect([t('c', 'frame', { blur: 0 })], 'blur')).toEqual([{ op: 'update', id: 'c', patch: { blur: 8 } }]);
+    expect(effectKindsOf({ shadows: [{ type: 'drop' }, { type: 'inner' }], blur: 4, backdropBlur: 8 })).toEqual(new Set(['drop', 'inner', 'blur', 'backdropBlur']));
+    // Hapus: shadow per indeks, skalar per kunci.
+    const s = t('d', 'frame', { shadows: [{ type: 'drop' }, { type: 'inner' }], blur: 4 });
+    expect(removeEffect([s], 'inner', 1)).toEqual([{ op: 'update', id: 'd', patch: { shadows: [{ type: 'drop' }] } }]);
+    expect(removeEffect([s], 'blur')).toEqual([{ op: 'update', id: 'd', patch: { blur: null } }]);
+  });
+
+  it('efek bertipe: convertEffect shadow↔shadow, shadow→skalar, skalar→shadow, skalar↔skalar', () => {
+    const drop = { type: 'drop', x: 0, y: 4, blur: 12, color: '#00000033' };
+    const a = t('a', 'frame', { shadows: [drop] });
+    expect(convertEffect([a], { index: 0 }, 'inner')).toEqual([{ op: 'update', id: 'a', patch: { shadows: [{ ...drop, type: 'inner' }] } }]);
+    expect(convertEffect([a], { index: 0 }, 'blur')).toEqual([{ op: 'update', id: 'a', patch: { shadows: null, blur: 8 } }]);
+    const b = t('b', 'frame', { blur: 6 });
+    expect(convertEffect([b], 'blur', 'drop')).toEqual([{ op: 'update', id: 'b', patch: { blur: null, shadows: [{ type: 'drop', x: 0, y: 4, blur: 12, color: '#00000033' }] } }]);
+    // Nilai skalar dibawa antar kunci (blur → backdropBlur).
+    expect(convertEffect([b], 'blur', 'backdropBlur')).toEqual([{ op: 'update', id: 'b', patch: { blur: null, backdropBlur: 6 } }]);
+    expect(convertEffect([a], { index: 2 }, 'inner')).toEqual([]);
+  });
+
+  it('padding sumbu/sisi (spec-design-panel-figma): edges, state sumbu (mixed), set axis/edge ternormalisasi', () => {
+    expect(paddingEdges(8)).toEqual([8, 8, 8, 8]);
+    expect(paddingEdges([4, 8])).toEqual([4, 8, 4, 8]);
+    expect(paddingEdges([1, 2, 3, 4])).toEqual([1, 2, 3, 4]);
+    expect(paddingEdgeOf({ padding: [4, 8] }, 1)).toBe(8);
+    const p = t('a', 'frame', { padding: [4, 8] });
+    expect(paddingAxisState([p], 'h')).toEqual({ mixed: false, value: 8, resolved: 8 });
+    expect(paddingAxisState([p], 'v')).toEqual({ mixed: false, value: 4, resolved: 4 });
+    // Kedua sisi sumbu beda (tuple 4) → mixed; nilai antar node beda → mixed.
+    expect(paddingAxisState([t('b', 'frame', { padding: [4, 8, 6, 8] })], 'v')).toEqual({ mixed: true });
+    expect(paddingAxisState([p, t('c', 'frame', { padding: [4, 10] })], 'h')).toEqual({ mixed: true });
+    // Tulis sumbu mempertahankan sisi lain lalu normalisasi: [4,10] → array 2; semua sama → angka; beda → tuple 4.
+    expect(setPaddingAxis([p], 'h', 10)).toEqual([{ op: 'update', id: 'a', patch: { padding: [4, 10] } }]);
+    // Nilai yang sama dengan tersimpan → tanpa op (filter perubahan kosong di opsFor).
+    expect(setPaddingAxis([t('d', 'frame', { padding: 4 })], 'h', 4)).toEqual([]);
+    expect(setPaddingAxis([p], 'v', 8)).toEqual([{ op: 'update', id: 'a', patch: { padding: 8 } }]);
+    expect(setPaddingEdge([t('d', 'frame', { padding: 4 })], 0, 8)).toEqual([{ op: 'update', id: 'd', patch: { padding: [8, 4, 4, 4] } }]);
+    expect(setPaddingEdge([t('e', 'frame', { padding: [8, 4, 4, 4] })], 0, 4)).toEqual([{ op: 'update', id: 'e', patch: { padding: 4 } }]);
   });
 
   it('tipografi: satu op per edit, multi dalam satu daftar', () => {

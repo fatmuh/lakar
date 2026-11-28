@@ -27,11 +27,10 @@ function renderSection() {
 }
 
 describe('ThemeSection: header + menu aksi', () => {
-  it('collapsed menampilkan ringkasan jumlah + mode; klik membuka isi', async () => {
+  it('collapsed menampilkan ringkasan jumlah token ("N tokens"); klik membuka isi', async () => {
     const t = renderSection();
-    const head = t.getByRole('button', { name: /^Theme\d/ });
-    expect(head.textContent).toContain('2');
-    expect(head.textContent).toContain('Light');
+    const head = t.getByRole('button', { name: /^Theme\d+ tokens/ });
+    expect(head.textContent).toContain('2 tokens');
     await t.user.click(head);
     // Mode switch + grup jenis token tampil.
     t.getByRole('radiogroup', { name: 'Token mode' });
@@ -64,7 +63,7 @@ describe('ThemeSection: header + menu aksi', () => {
 
   it('menu ⋯: Rename mode… membuka input yang mengirim ops rename', async () => {
     const t = renderSection();
-    await t.user.click(t.getByRole('button', { name: /^Theme\d/ }));
+    await t.user.click(t.getByRole('button', { name: /^Theme\d+ tokens/ }));
     await t.user.click(t.getByRole('button', { name: 'Theme actions' }));
     await t.user.click(t.getByRole('menuitem', { name: 'Rename Light…' }));
     const input = t.getByRole('textbox', { name: 'Rename mode Light' });

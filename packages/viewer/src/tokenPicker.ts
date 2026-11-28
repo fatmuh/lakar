@@ -4,7 +4,7 @@
 // berupa DocOp[] untuk route ops viewer (AD-7). Setter slot = pembangun op edit literal field yang sama (designModel).
 import { isTokenValueOf, LENGTH_TOKEN_TYPES, tokenSlot, type DocOp, type TokenType } from '@lakar/schema';
 // Label History tanpa akhiran " on N layers": antrean panel Design (`ctx.run`) menambahkannya lewat `describeEdit`.
-import { editFill, radiusAll, radiusCorners, readField, setProp, setRadiusAll, setRadiusCorner, setStroke, type DesignTarget, type FieldState, type Raw } from './designModel.js';
+import { editFill, paddingEdges, radiusAll, radiusCorners, readField, setPaddingAxis, setPaddingEdge, setProp, setRadiusAll, setRadiusCorner, setStroke, type DesignTarget, type FieldState, type PadAxis, type Raw } from './designModel.js';
 import { isTokenRef } from './designValues.js';
 import { cellOf, groupOf, modeLabel, tokenNameError, TYPE_META, type Built, type TokenDefLike, type TokenMap } from './themeModel.js';
 
@@ -80,6 +80,22 @@ export const radiusSpec = (corner?: number, label = 'Radius'): TokenSpec =>
         set: setRadiusAll,
       }
     : { propPath: ['radius', corner], label, read: (n) => radiusCorners(n.radius)[corner], set: (ts, v) => setRadiusCorner(ts, corner, v) };
+
+/** Slot token sumbu padding (kolom Pad H/V): token diterapkan ke kedua sisi sumbu (sisi lain dipertahankan). */
+export const paddingAxisSpec = (axis: PadAxis, label: string): TokenSpec => ({
+  propPath: ['padding', axis === 'h' ? 1 : 0],
+  label,
+  read: (n) => paddingEdges(n.padding)[axis === 'h' ? 1 : 0],
+  set: (ts, v) => setPaddingAxis(ts, axis, v),
+});
+
+/** Slot token satu sisi padding (kolom Independent T/R/B/L; indeks tuple [t,r,b,l]). */
+export const paddingEdgeSpec = (index: number, label: string): TokenSpec => ({
+  propPath: ['padding', index],
+  label,
+  read: (n) => paddingEdges(n.padding)[index],
+  set: (ts, v) => setPaddingEdge(ts, index, v),
+});
 
 export type SlotTypes = { accepts: TokenType[]; primary: TokenType };
 

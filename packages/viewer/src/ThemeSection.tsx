@@ -19,6 +19,7 @@ import {
   modeIcon,
   modeLabel,
   newTokenName,
+  readThemeMode,
   renameModeOps,
   renameTokenOps,
   setCellOps,
@@ -29,6 +30,7 @@ import {
   type ThemeDoc,
   type TokenDefLike,
 } from './themeModel';
+import type { DesignTarget } from './designModel';
 
 type Commit = (ops: DocOp[], description: string) => Promise<boolean>;
 /** Batas tunggu rev commit sebelumnya sebelum antrean dilanjutkan (dokumen gagal dimuat ulang). */
@@ -182,6 +184,7 @@ export function ThemeSection({
   rev,
   editable,
   onCommit,
+  boardTheme,
   onImportCss,
   onImportDtcg,
   importOpen = false,
@@ -190,6 +193,11 @@ export function ThemeSection({
   rev: number;
   editable: boolean;
   onCommit: Commit;
+  /**
+   * "Board theme" (desain badge 7, spec-design-panel-figma): mode tema board terpilih — segmented sun/moon +
+   * helper; ditulis lewat `onPick` pemanggil (satu commit). undefined = seleksi bukan board.
+   */
+  boardTheme?: { targets: readonly DesignTarget[]; modes: readonly string[]; onPick: (mode: string) => void } | undefined;
   onImportCss?: (() => void) | undefined;
   onImportDtcg?: (() => void) | undefined;
   importOpen?: boolean;
@@ -324,7 +332,9 @@ export function ThemeSection({
   };
 
   const confirmUses = confirm ? (usage.get(confirm) ?? 0) : 0;
-  const summary = `${count}${active ? ` · ${modeLabel(active)}` : ''}`;
+  // Ringkasan header (desain badge 7): jumlah token saja ("3 tokens"); mode ada di baris Board theme/body.
+  const summary = `${count} ${count === 1 ? 'token' : 'tokens'}`;
+  const boardMode = boardTheme ? readThemeMode(boardTheme.targets, boardTheme.modes) : undefined;
 
   return (
     <div ref={root} className="theme-section">
@@ -418,6 +428,38 @@ export function ThemeSection({
         </span>
         {copyOpen && <CopyTokensPopover doc={doc} onClose={() => setCopyOpen(false)} />}
       </div>
+      {/* Board theme (desain badge 7): segmented mode tema board terpilih + helper; selalu tampil saat board terseleksi. */}
+      {boardTheme && (
+        <div className="theme-board">
+          <div className="dp-row">
+            <span className="dp-field-label">Board theme</span>
+            {boardTheme.modes.length <= 3 ? (
+              <div className="segmented dp-grow" role="radiogroup" aria-label="Board theme">
+                {boardTheme.modes.map((m) => (
+                  <button key={m} type="button" role="radio" aria-checked={m === boardMode} className={`segment${m === boardMode ? ' active' : ''}`} disabled={!editable} onClick={() => boardTheme.onPick(m)}>
+                    <Icon name={modeIcon(m)} size={12} />
+                    {modeLabel(m)}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <select className="input select dp-grow" aria-label="Board theme" value={boardMode ?? '__mixed'} disabled={!editable} onChange={(e) => boardTheme.onPick(e.currentTarget.value)}>
+                {boardMode === undefined && (
+                  <option value="__mixed" disabled>
+                    Mixed
+                  </option>
+                )}
+                {boardTheme.modes.map((m) => (
+                  <option key={m} value={m}>
+                    {modeLabel(m)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          <span className="dp-helper">Applies to every layer on this board, including instances.</span>
+        </div>
+      )}
       {open && (
         <div className="theme-section-body">
           {modes.length > 0 && (
